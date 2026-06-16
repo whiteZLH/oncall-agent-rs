@@ -2,6 +2,29 @@
 
 这不是一次 Java 到 Rust 的等价移植，更像是围绕现有能力重新组装一套 Rust 服务。Web、异步运行时、Redis、HTTP、指标、日志、向量库在 Rust 生态里都很成熟；真正需要谨慎设计的是 Spring AI 风格的一站式 Agent 编排体验，尤其是当前项目里的 planner -> executor -> replan -> finish 诊断循环。
 
+## 当前进度
+
+截至 2026-06-16，`oncall-agent-rs` 已完成一版最小服务骨架：
+
+- 已有 `axum` 启动入口和路由装配。
+- 已接入 CORS、timeout、trace、request id。
+- 已提供 `GET /health`、`GET /ready`、`GET /metrics`。
+- 已提供最小可运行的 `POST /api/chat`、`GET /api/incidents`。
+- 已拆出 `domain/`、`http/`、`services/` 基础结构。
+- 已有基础 API smoke tests，可用 `cargo test` 验证。
+
+这意味着项目已经进入“可以继续对齐 API 和接外部依赖”的阶段，不再只是空白脚手架。
+
+## 下一步建议
+
+下一阶段优先做下面几项，而不是立刻进入 Agent loop：
+
+1. 对齐 Java 版 `chat` 和 `incident` DTO 字段，减少前端改动。
+2. 增加 `webhooks`、`sse`、`uploads` 的空实现入口和契约测试。
+3. 引入配置文件方案，替代当前纯 env 读取。
+4. 接入 Redis session/cache 与 Prometheus/logs client。
+5. 在外部依赖稳定后，再进入 RAG 和 diagnosis 状态机。
+
 ## 迁移判断
 
 最稳路线不是寻找一个 Rust 全家桶框架，而是先把项目的确定性基础能力迁过去，再逐步接入 Agent/RAG 抽象：

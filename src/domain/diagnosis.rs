@@ -1,33 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize)]
-pub struct HealthResponse {
-    pub status: &'static str,
-}
-
-#[derive(Serialize)]
-pub struct ApiErrorResponse {
-    pub error: &'static str,
-    pub message: String,
-}
-
-#[derive(Deserialize)]
-pub struct MessageEnvelope {
-    pub message: String,
-}
-
-#[derive(Serialize)]
-pub struct ChatResponse {
-    pub reply: String,
-}
-
-#[derive(Serialize)]
-pub struct IncidentSummary {
-    pub id: String,
-    pub title: String,
-    pub status: String,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DiagnosisRun {
     pub run_id: String,
@@ -65,13 +37,4 @@ pub struct DiagnosisEvidence {
     pub error_message: String,
     pub error_code: String,
     pub created_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct DocumentChunk {
-    pub content: String,
-    pub start_index: i32,
-    pub end_index: i32,
-    pub chunk_index: i32,
-    pub title: String,
 }

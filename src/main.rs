@@ -1,18 +1,11 @@
-mod app;
-mod config;
-mod error;
-mod models;
-mod routes;
-mod services;
-mod state;
-
-use crate::config::AppConfig;
+use oncall_agent_rs::{app, config::AppConfig};
 use std::net::SocketAddr;
 use tracing::info;
 
 #[tokio::main]
 async fn main() {
-    let config = AppConfig::from_env();
+    let config = AppConfig::from_env()
+        .unwrap_or_else(|error| panic!("failed to load configuration: {}", error));
     init_tracing(&config);
 
     let app = app::build_router(config.clone());

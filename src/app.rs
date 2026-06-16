@@ -1,22 +1,29 @@
 use crate::{
     config::AppConfig,
-    routes::{chat, health, incidents, metrics},
+    http::routes::{chat, health, incidents, metrics},
     services::{chat_service::ChatService, incident_service::IncidentService},
     state::AppState,
 };
 use axum::{
-    http::{header::HeaderValue, StatusCode},
+    extract::Request,
+    http::{header::HeaderValue, HeaderName, StatusCode},
+    middleware::{self, Next},
+    response::Response,
     Router,
 };
 use std::sync::Arc;
 use tower_http::{
     cors::{Any, CorsLayer},
+    request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
     timeout::TimeoutLayer,
     trace::TraceLayer,
 };
 
+pub const REQUEST_ID_HEADER: &str = "x-request-id";
+
 pub fn build_router(config: AppConfig) -> Router {
     let state = Arc::new(AppState::new(ChatService::new(), IncidentService::new()));
+    let request_id_header = HeaderName::from_static(REQUEST_ID_HEADER);
     let cors = if config.allowed_origin == "*" {
         CorsLayer::new().allow_origin(Any)
     } else {
@@ -31,6 +38,12 @@ pub fn build_router(config: AppConfig) -> Router {
         .merge(metrics::router())
         .merge(chat::router())
         .merge(incidents::router())
+        .layer(PropagateRequestIdLayer::new(request_id_header.clone()))
+        .layer(SetRequestIdLayer::new(
+            request_id_header.clone(),
+            MakeRequestUuid,
+        ))
+        .layer(middleware::from_fn(attach_request_id))
         .layer(TraceLayer::new_for_http())
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
@@ -38,4 +51,14 @@ pub fn build_router(config: AppConfig) -> Router {
         ))
         .layer(cors)
         .with_state(state)
+}
+
+async fn attach_request_id(mut request: Request, next: Next) -> Response {
+    let request_id = request
+        .headers()
+        .get(REQUEST_ID_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned);
+    request.extensions_mut().insert(request_id);
+    next.run(request).await
 }

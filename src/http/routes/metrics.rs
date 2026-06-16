@@ -9,7 +9,6 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 async fn metrics() -> impl IntoResponse {
-    // 先暴露一份最小可用的 Prometheus 文本，后续再接真实 registry。
     concat!(
         "# HELP oncall_agent_up Whether the service is running.\n",
         "# TYPE oncall_agent_up gauge\n",

@@ -1,6 +1,6 @@
 use crate::{
     error::AppError,
-    models::{ChatResponse, MessageEnvelope},
+    http::dto::{ChatResponse, MessageEnvelope},
 };
 
 pub struct ChatService;
