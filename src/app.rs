@@ -28,7 +28,7 @@ pub fn build_router(config: AppConfig) -> Router {
         CorsLayer::new().allow_origin(Any)
     } else {
         let origin = HeaderValue::from_str(&config.allowed_origin)
-            .unwrap_or_else(|error| panic!("invalid APP_ALLOWED_ORIGIN: {}", error));
+            .unwrap_or_else(|error| panic!("APP_ALLOWED_ORIGIN 配置不合法: {}", error));
         CorsLayer::new().allow_origin(origin)
     };
 

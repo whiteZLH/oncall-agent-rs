@@ -52,7 +52,7 @@ impl ChatService {
             .unwrap_or("default-session");
         let answer = format!("oncall-agent-rs received [{}]: {}", session_id, question);
 
-        let mut sessions = self.sessions.lock().expect("chat sessions lock poisoned");
+        let mut sessions = self.sessions.lock().expect("会话存储锁已损坏");
         let now = now_millis();
         let session = sessions
             .entry(session_id.to_string())
@@ -81,7 +81,7 @@ impl ChatService {
             return ClearResult::MissingSessionId;
         }
 
-        let mut sessions = self.sessions.lock().expect("chat sessions lock poisoned");
+        let mut sessions = self.sessions.lock().expect("会话存储锁已损坏");
         let Some(session) = sessions.get_mut(trimmed) else {
             return ClearResult::NotFound;
         };
@@ -94,7 +94,7 @@ impl ChatService {
     pub fn session_info(&self, session_id: &str) -> Option<SessionInfoResponse> {
         self.sessions
             .lock()
-            .expect("chat sessions lock poisoned")
+            .expect("会话存储锁已损坏")
             .get(session_id)
             .map(|session| SessionInfoResponse {
                 session_id: session.session_id.clone(),
@@ -107,7 +107,7 @@ impl ChatService {
         let mut sessions = self
             .sessions
             .lock()
-            .expect("chat sessions lock poisoned")
+            .expect("会话存储锁已损坏")
             .values()
             .map(|session| ChatSessionSummary {
                 session_id: session.session_id.clone(),
@@ -124,7 +124,7 @@ impl ChatService {
     pub fn session_messages(&self, session_id: &str) -> Option<ChatSessionRecord> {
         self.sessions
             .lock()
-            .expect("chat sessions lock poisoned")
+            .expect("会话存储锁已损坏")
             .get(session_id)
             .cloned()
     }
@@ -132,7 +132,7 @@ impl ChatService {
     pub fn delete_session(&self, session_id: &str) -> bool {
         self.sessions
             .lock()
-            .expect("chat sessions lock poisoned")
+            .expect("会话存储锁已损坏")
             .remove(session_id)
             .is_some()
     }
@@ -156,6 +156,6 @@ fn session_title(session: &ChatSessionRecord) -> String {
 fn now_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("system clock before unix epoch")
+        .expect("系统时间早于 Unix 纪元")
         .as_millis() as i64
 }

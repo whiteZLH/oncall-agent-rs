@@ -24,7 +24,7 @@ impl IncidentService {
         let mut summaries = self
             .incidents
             .lock()
-            .expect("incidents lock poisoned")
+            .expect("事故存储锁已损坏")
             .values()
             .map(summary)
             .collect::<Vec<_>>();
@@ -35,7 +35,7 @@ impl IncidentService {
     pub fn get(&self, incident_id: &str) -> Option<IncidentRecord> {
         self.incidents
             .lock()
-            .expect("incidents lock poisoned")
+            .expect("事故存储锁已损坏")
             .get(incident_id)
             .cloned()
     }
@@ -46,7 +46,7 @@ impl IncidentService {
     }
 
     pub fn diagnose(&self, incident_id: &str) -> Option<DiagnosisRun> {
-        let mut incidents = self.incidents.lock().expect("incidents lock poisoned");
+        let mut incidents = self.incidents.lock().expect("事故存储锁已损坏");
         let incident = incidents.get_mut(incident_id)?;
         let now = now_millis();
         let run = DiagnosisRun {
@@ -70,7 +70,7 @@ impl IncidentService {
             message: if self.get(incident_id).is_some() {
                 "历史案例已写入知识库".to_string()
             } else {
-                "Incident 不存在".to_string()
+                "事故不存在".to_string()
             },
         }
     }
@@ -158,6 +158,6 @@ fn build_alert_context(incident: &IncidentRecord) -> String {
 fn now_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("system clock before unix epoch")
+        .expect("系统时间早于 Unix 纪元")
         .as_millis() as i64
 }

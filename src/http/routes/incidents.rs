@@ -48,7 +48,7 @@ async fn get_incident(
         Some(record) => (StatusCode::OK, Json(ApiResponse::success(record))),
         None => (
             StatusCode::NOT_FOUND,
-            Json(ApiResponse::error(404, "Incident 不存在")),
+            Json(ApiResponse::error(404, "事故不存在")),
         ),
     }
 }
@@ -61,7 +61,7 @@ async fn get_diagnosis_runs(
         Some(runs) => (StatusCode::OK, Json(ApiResponse::success(runs))),
         None => (
             StatusCode::NOT_FOUND,
-            Json(ApiResponse::error(404, "Incident 不存在")),
+            Json(ApiResponse::error(404, "事故不存在")),
         ),
     }
 }
@@ -74,7 +74,7 @@ async fn diagnose_incident(
         Some(run) => (StatusCode::OK, Json(ApiResponse::success(run))),
         None => (
             StatusCode::NOT_FOUND,
-            Json(ApiResponse::error(404, "Incident 不存在")),
+            Json(ApiResponse::error(404, "事故不存在")),
         ),
     }
 }

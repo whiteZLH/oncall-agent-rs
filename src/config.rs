@@ -19,7 +19,7 @@ impl AppConfig {
 
         if request_timeout_secs == 0 {
             return Err(ConfigError::InvalidValue(
-                "APP_REQUEST_TIMEOUT_SECS must be greater than 0".to_string(),
+                "APP_REQUEST_TIMEOUT_SECS 必须大于 0".to_string(),
             ));
         }
 
@@ -53,10 +53,10 @@ fn read_host(key: &str) -> Result<Option<Ipv4Addr>, ConfigError> {
         Ok(value) => value
             .parse()
             .map(Some)
-            .map_err(|_| ConfigError::InvalidValue(format!("{key} must be a valid IPv4 address"))),
+            .map_err(|_| ConfigError::InvalidValue(format!("{key} 必须是合法的 IPv4 地址"))),
         Err(env::VarError::NotPresent) => Ok(None),
         Err(env::VarError::NotUnicode(_)) => Err(ConfigError::InvalidValue(format!(
-            "{key} must be valid unicode"
+            "{key} 必须是合法的 Unicode 字符串"
         ))),
     }
 }
@@ -66,10 +66,10 @@ fn read_port(key: &str) -> Result<Option<u16>, ConfigError> {
         Ok(value) => value
             .parse()
             .map(Some)
-            .map_err(|_| ConfigError::InvalidValue(format!("{key} must be a valid port"))),
+            .map_err(|_| ConfigError::InvalidValue(format!("{key} 必须是合法的端口号"))),
         Err(env::VarError::NotPresent) => Ok(None),
         Err(env::VarError::NotUnicode(_)) => Err(ConfigError::InvalidValue(format!(
-            "{key} must be valid unicode"
+            "{key} 必须是合法的 Unicode 字符串"
         ))),
     }
 }
@@ -79,10 +79,10 @@ fn read_u64(key: &str) -> Result<Option<u64>, ConfigError> {
         Ok(value) => value
             .parse()
             .map(Some)
-            .map_err(|_| ConfigError::InvalidValue(format!("{key} must be a positive integer"))),
+            .map_err(|_| ConfigError::InvalidValue(format!("{key} 必须是正整数"))),
         Err(env::VarError::NotPresent) => Ok(None),
         Err(env::VarError::NotUnicode(_)) => Err(ConfigError::InvalidValue(format!(
-            "{key} must be valid unicode"
+            "{key} 必须是合法的 Unicode 字符串"
         ))),
     }
 }
@@ -93,8 +93,8 @@ fn read_string(key: &str) -> Result<Option<String>, ConfigError> {
         Err(env::VarError::NotPresent) => return Ok(None),
         Err(env::VarError::NotUnicode(_)) => {
             return Err(ConfigError::InvalidValue(format!(
-                "{key} must be valid unicode"
-            )))
+                "{key} 必须是合法的 Unicode 字符串"
+            )));
         }
     };
     let trimmed = value.trim();

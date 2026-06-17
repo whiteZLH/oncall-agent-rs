@@ -4,8 +4,7 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() {
-    let config = AppConfig::from_env()
-        .unwrap_or_else(|error| panic!("failed to load configuration: {}", error));
+    let config = AppConfig::from_env().unwrap_or_else(|error| panic!("加载配置失败: {}", error));
     init_tracing(&config);
 
     let app = app::build_router(config.clone());
@@ -15,10 +14,10 @@ async fn main() {
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await
-        .unwrap_or_else(|error| panic!("failed to bind {}: {}", addr, error));
+        .unwrap_or_else(|error| panic!("绑定监听地址 {} 失败: {}", addr, error));
     axum::serve(listener, app)
         .await
-        .unwrap_or_else(|error| panic!("server exited with error: {}", error));
+        .unwrap_or_else(|error| panic!("服务异常退出: {}", error));
 }
 
 fn init_tracing(config: &AppConfig) {
