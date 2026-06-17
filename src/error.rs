@@ -28,10 +28,8 @@ impl AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
-            AppError::BadRequest(message) => (StatusCode::BAD_REQUEST, "bad_request", message),
-            AppError::Internal(message) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", message)
-            }
+            AppError::BadRequest(message) => (StatusCode::BAD_REQUEST, 400, message),
+            AppError::Internal(message) => (StatusCode::INTERNAL_SERVER_ERROR, 500, message),
         };
 
         let body = Json(ApiErrorResponse {

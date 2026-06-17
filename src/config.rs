@@ -50,9 +50,10 @@ impl std::error::Error for ConfigError {}
 
 fn read_host(key: &str) -> Result<Option<Ipv4Addr>, ConfigError> {
     match env::var(key) {
-        Ok(value) => value.parse().map(Some).map_err(|_| {
-            ConfigError::InvalidValue(format!("{key} must be a valid IPv4 address"))
-        }),
+        Ok(value) => value
+            .parse()
+            .map(Some)
+            .map_err(|_| ConfigError::InvalidValue(format!("{key} must be a valid IPv4 address"))),
         Err(env::VarError::NotPresent) => Ok(None),
         Err(env::VarError::NotUnicode(_)) => Err(ConfigError::InvalidValue(format!(
             "{key} must be valid unicode"
@@ -75,9 +76,10 @@ fn read_port(key: &str) -> Result<Option<u16>, ConfigError> {
 
 fn read_u64(key: &str) -> Result<Option<u64>, ConfigError> {
     match env::var(key) {
-        Ok(value) => value.parse().map(Some).map_err(|_| {
-            ConfigError::InvalidValue(format!("{key} must be a positive integer"))
-        }),
+        Ok(value) => value
+            .parse()
+            .map(Some)
+            .map_err(|_| ConfigError::InvalidValue(format!("{key} must be a positive integer"))),
         Err(env::VarError::NotPresent) => Ok(None),
         Err(env::VarError::NotUnicode(_)) => Err(ConfigError::InvalidValue(format!(
             "{key} must be valid unicode"

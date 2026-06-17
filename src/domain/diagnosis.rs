@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct DiagnosisRun {
     pub run_id: String,
     pub incident_id: String,
@@ -22,6 +23,7 @@ pub struct DiagnosisRun {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct DiagnosisEvidence {
     pub id: String,
     #[serde(rename = "type")]
