@@ -3,7 +3,9 @@ use crate::{
     http::routes::{chat, health, incidents, metrics},
     services::{
         chat_service::ChatService, incident_service::IncidentService,
+        memory_extraction_service::MemoryExtractionService,
         session_manager::SessionManager,
+        vector_search_service::VectorSearchService,
     },
     state::AppState,
 };
@@ -26,7 +28,10 @@ pub const REQUEST_ID_HEADER: &str = "x-request-id";
 
 pub fn build_router(config: AppConfig) -> Router {
     let state = Arc::new(AppState::new(
+        config.clone(),
         ChatService::new(&config),
+        VectorSearchService::new(&config),
+        MemoryExtractionService::new(&config),
         SessionManager::new(&config),
         IncidentService::new(),
     ));

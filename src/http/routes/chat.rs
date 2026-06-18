@@ -1,7 +1,8 @@
 use crate::{
+    domain::chat::ChatMessage,
     domain::chat::{ChatSessionRecord, ChatSessionSummary, SessionInfoResponse},
     http::dto::{ApiResponse, ChatRequest, ChatResponse, ClearRequest},
-    services::session_manager::ClearResult,
+    services::session_manager::{ClearResult, SessionInfo},
     state::AppState,
 };
 use axum::{
@@ -10,7 +11,7 @@ use axum::{
     Json, Router,
 };
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -51,9 +52,18 @@ async fn chat(
 
     state.chat_service.log_available_tools();
 
-    let system_prompt = state.chat_service.build_system_prompt(&history);
+    info!("开始 ReactAgent 对话（支持自动工具调用）");
 
     let session_id = session.session_id().to_string();
+    let private_memories = search_private_memories(&state, question, &session).await;
+
+    let system_prompt = state
+        .chat_service
+        .build_system_prompt(&history, &private_memories);
+
+
+    
+
     let answer = match state
         .chat_service
         .execute_chat(&session_id, question, &system_prompt)
@@ -65,9 +75,10 @@ async fn chat(
         }
     };
 
-    state
+    let evicted_messages = state
         .session_manager
         .record_exchange(&session_id, question, &answer);
+    trigger_memory_extraction(&state, &session_id, evicted_messages);
 
     Json(ApiResponse::success(ChatResponse::success(answer)))
 }
@@ -122,4 +133,56 @@ async fn delete_chat_session(
     } else {
         Json(ApiResponse::error(500, "会话不存在"))
     }
+}
+
+async fn search_private_memories(
+    state: &Arc<AppState>,
+    question: &str,
+    session: &SessionInfo,
+) -> Vec<crate::domain::memory::PrivateMemorySearchResult> {
+    if session.session_id().trim().is_empty() {
+        return Vec::new();
+    }
+
+    if !state.config.private_memory_recall_enabled {
+        return Vec::new();
+    }
+
+    let memory_top_k = state.config.private_memory_recall_top_k.max(1);
+
+    match state
+        .vector_search_service
+        .search_session_memories(question, session.session_id(), memory_top_k)
+        .await
+    {
+        Ok(results) => results,
+        Err(error) => {
+            warn!("检索私人长期记忆失败，继续普通对话: {}", error);
+            Vec::new()
+        }
+    }
+}
+
+fn trigger_memory_extraction(
+    state: &Arc<AppState>,
+    session_id: &str,
+    evicted_messages: Vec<ChatMessage>,
+) {
+    if evicted_messages.is_empty() {
+        return;
+    }
+
+    let memory_extraction_service = state.memory_extraction_service.clone();
+    let session_id = session_id.to_string();
+    tokio::spawn(async move {
+        if let Err(error) = memory_extraction_service
+            .extract_and_store(&session_id, &evicted_messages)
+            .await
+        {
+            warn!(
+                "提炼长期记忆失败: session_id={}, error={}",
+                session_id, error
+            );
+        }
+    });
 }

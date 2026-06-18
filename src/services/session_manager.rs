@@ -13,6 +13,8 @@ use std::{
 };
 use uuid::Uuid;
 
+const MAX_WINDOW_SIZE: usize = 6;
+
 pub struct SessionManager {
     sessions: Mutex<HashMap<String, SessionInfo>>,
     redis_url: Option<String>,
@@ -79,12 +81,13 @@ impl SessionManager {
         session
     }
 
-    pub fn record_exchange(&self, session_id: &str, question: &str, answer: &str) {
+    pub fn record_exchange(&self, session_id: &str, question: &str, answer: &str) -> Vec<ChatMessage> {
         let mut sessions = self.sessions.lock().expect("会话存储锁已损坏");
         let now = now_millis();
         let session = sessions
             .entry(session_id.to_string())
             .or_insert_with(|| SessionInfo::new(session_id.to_string()));
+        let mut evicted_messages = Vec::new();
         session.message_history.push(ChatMessage {
             role: "user".to_string(),
             content: question.to_string(),
@@ -93,11 +96,19 @@ impl SessionManager {
             role: "assistant".to_string(),
             content: answer.to_string(),
         });
+        let max_messages = MAX_WINDOW_SIZE * 2;
+        while session.message_history.len() > max_messages {
+            evicted_messages.push(session.message_history.remove(0));
+            if !session.message_history.is_empty() {
+                evicted_messages.push(session.message_history.remove(0));
+            }
+        }
         session.update_time = now;
         drop(sessions);
 
         self.save_to_redis(&self.get_or_create_session(Some(session_id)));
         self.append_to_history_store(session_id, question, answer);
+        evicted_messages
     }
 
     pub fn clear(&self, session_id: &str) -> ClearResult {
@@ -253,7 +264,8 @@ impl SessionManager {
     fn load_from_history_store(&self, session_id: &str) -> Option<SessionInfo> {
         let path = self.chat_history_path.join(format!("{session_id}.json"));
         let content = fs::read_to_string(path).ok()?;
-        let record: ChatSessionRecord = serde_json::from_str(&content).ok()?;
+        let mut record: ChatSessionRecord = serde_json::from_str(&content).ok()?;
+        record.message_history = recent_window(record.message_history);
         Some(SessionInfo::from_record(record))
     }
 
@@ -306,7 +318,7 @@ pub enum ClearResult {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct SessionInfo {
+pub struct SessionInfo {
     session_id: String,
     create_time: i64,
     update_time: i64,
@@ -348,11 +360,11 @@ impl SessionInfo {
         }
     }
 
-    pub(crate) fn session_id(&self) -> &str {
+    pub fn session_id(&self) -> &str {
         &self.session_id
     }
 
-    pub(crate) fn get_history(&self) -> Vec<ChatMessage> {
+    pub fn get_history(&self) -> Vec<ChatMessage> {
         self.message_history.clone()
     }
 }
@@ -382,8 +394,15 @@ fn session_title(session: &ChatSessionRecord) -> String {
         .message_history
         .iter()
         .find(|message| message.role == "user")
-        .map(|message| message.content.clone())
-        .unwrap_or_else(|| "新会话".to_string())
+        .map(|message| {
+            let content = message.content.trim();
+            if content.chars().count() > 30 {
+                format!("{}...", content.chars().take(30).collect::<String>())
+            } else {
+                content.to_string()
+            }
+        })
+        .unwrap_or_else(|| "新对话".to_string())
 }
 
 fn now_millis() -> i64 {
@@ -391,4 +410,13 @@ fn now_millis() -> i64 {
         .duration_since(UNIX_EPOCH)
         .expect("系统时间早于 Unix 纪元")
         .as_millis() as i64
+}
+
+fn recent_window(history: Vec<ChatMessage>) -> Vec<ChatMessage> {
+    let max_messages = MAX_WINDOW_SIZE * 2;
+    let history_len = history.len();
+    if history_len <= max_messages {
+        return history;
+    }
+    history.into_iter().skip(history_len - max_messages).collect()
 }
