@@ -1,7 +1,10 @@
 use crate::{
     config::AppConfig,
     http::routes::{chat, health, incidents, metrics},
-    services::{chat_service::ChatService, incident_service::IncidentService},
+    services::{
+        chat_service::ChatService, incident_service::IncidentService,
+        session_manager::SessionManager,
+    },
     state::AppState,
 };
 use axum::{
@@ -22,7 +25,11 @@ use tower_http::{
 pub const REQUEST_ID_HEADER: &str = "x-request-id";
 
 pub fn build_router(config: AppConfig) -> Router {
-    let state = Arc::new(AppState::new(ChatService::new(), IncidentService::new()));
+    let state = Arc::new(AppState::new(
+        ChatService::new(&config),
+        SessionManager::new(&config),
+        IncidentService::new(),
+    ));
     let request_id_header = HeaderName::from_static(REQUEST_ID_HEADER);
     let cors = if config.allowed_origin == "*" {
         CorsLayer::new().allow_origin(Any)

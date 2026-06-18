@@ -1,161 +1,77 @@
-use crate::{
-    domain::chat::{ChatMessage, ChatSessionRecord, ChatSessionSummary, SessionInfoResponse},
-    http::dto::{ChatRequest, ChatResponse},
-};
-use std::{
-    collections::HashMap,
-    sync::Mutex,
-    time::{SystemTime, UNIX_EPOCH},
+use crate::{config::AppConfig, domain::chat::ChatMessage, error::AppError};
+use rig::{
+    client::CompletionClient,
+    completion::Prompt,
+    providers::openai,
 };
 
 pub struct ChatService {
-    sessions: Mutex<HashMap<String, ChatSessionRecord>>,
+    api_key: Option<String>,
+    base_url: String,
+    model: String,
 }
 
 impl ChatService {
-    pub fn new() -> Self {
-        let seed = ChatSessionRecord {
-            session_id: "session-1".to_string(),
-            create_time: 1_718_559_600_000,
-            update_time: 1_718_559_960_000,
-            message_history: vec![
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: "继续上次的话题".to_string(),
-                },
-                ChatMessage {
-                    role: "assistant".to_string(),
-                    content: "这是 Rust 迁移服务的会话占位回复。".to_string(),
-                },
-            ],
-        };
-
+    pub fn new(config: &AppConfig) -> Self {
         Self {
-            sessions: Mutex::new(HashMap::from([(seed.session_id.clone(), seed)])),
+            api_key: config.dashscope_api_key.clone(),
+            base_url: config.dashscope_base_url.clone(),
+            model: config.dashscope_chat_model.clone(),
         }
     }
 
-    pub fn reply(&self, input: ChatRequest) -> ChatResponse {
-        let Some(question) = input.question.as_deref().map(str::trim) else {
-            return ChatResponse::error("问题内容不能为空");
+    pub fn log_available_tools(&self) {}
+
+    pub fn build_system_prompt(&self, history: &[ChatMessage]) -> String {
+        if history.is_empty() {
+            return "你是一个专业的智能助手。请基于当前问题给出准确、直接的回答。"
+                .to_string();
+        }
+
+        let mut prompt = String::from("你是一个专业的智能助手。\n\n--- 对话历史 ---\n");
+        for message in history {
+            match message.role.as_str() {
+                "user" => {
+                    prompt.push_str("用户: ");
+                    prompt.push_str(&message.content);
+                    prompt.push('\n');
+                }
+                "assistant" => {
+                    prompt.push_str("助手: ");
+                    prompt.push_str(&message.content);
+                    prompt.push('\n');
+                }
+                _ => {}
+            }
+        }
+        prompt.push_str("--- 对话历史结束 ---\n\n请基于以上对话历史，回答用户的新问题。");
+        prompt
+    }
+
+    pub async fn execute_chat(
+        &self,
+        session_id: &str,
+        question: &str,
+        system_prompt: &str,
+    ) -> Result<String, AppError> {
+        let Some(api_key) = self.api_key.as_ref() else {
+            return Ok(format!("oncall-agent-rs received [{}]: {}", session_id, question));
         };
 
-        if question.is_empty() {
-            return ChatResponse::error("问题内容不能为空");
-        }
+        let client = openai::Client::builder()
+            .api_key(api_key)
+            .base_url(&self.base_url)
+            .build()
+            .map_err(|error| AppError::internal(format!("初始化 rig OpenAI client 失败: {error}")))?;
 
-        let session_id = input
-            .id
-            .as_deref()
-            .map(str::trim)
-            .filter(|id| !id.is_empty())
-            .unwrap_or("default-session");
-        let answer = format!("oncall-agent-rs received [{}]: {}", session_id, question);
+        let agent = client
+            .agent(&self.model)
+            .preamble(system_prompt)
+            .build();
 
-        let mut sessions = self.sessions.lock().expect("会话存储锁已损坏");
-        let now = now_millis();
-        let session = sessions
-            .entry(session_id.to_string())
-            .or_insert_with(|| ChatSessionRecord {
-                session_id: session_id.to_string(),
-                create_time: now,
-                update_time: now,
-                message_history: Vec::new(),
-            });
-        session.message_history.push(ChatMessage {
-            role: "user".to_string(),
-            content: question.to_string(),
-        });
-        session.message_history.push(ChatMessage {
-            role: "assistant".to_string(),
-            content: answer.clone(),
-        });
-        session.update_time = now;
-
-        ChatResponse::success(answer)
+        agent
+            .prompt(question)
+            .await
+            .map_err(|error| AppError::internal(format!("rig agent 调用失败: {error}")))
     }
-
-    pub fn clear(&self, session_id: &str) -> ClearResult {
-        let trimmed = session_id.trim();
-        if trimmed.is_empty() {
-            return ClearResult::MissingSessionId;
-        }
-
-        let mut sessions = self.sessions.lock().expect("会话存储锁已损坏");
-        let Some(session) = sessions.get_mut(trimmed) else {
-            return ClearResult::NotFound;
-        };
-
-        session.message_history.clear();
-        session.update_time = now_millis();
-        ClearResult::Cleared
-    }
-
-    pub fn session_info(&self, session_id: &str) -> Option<SessionInfoResponse> {
-        self.sessions
-            .lock()
-            .expect("会话存储锁已损坏")
-            .get(session_id)
-            .map(|session| SessionInfoResponse {
-                session_id: session.session_id.clone(),
-                message_pair_count: session.message_history.len() / 2,
-                create_time: session.create_time,
-            })
-    }
-
-    pub fn list_sessions(&self) -> Vec<ChatSessionSummary> {
-        let mut sessions = self
-            .sessions
-            .lock()
-            .expect("会话存储锁已损坏")
-            .values()
-            .map(|session| ChatSessionSummary {
-                session_id: session.session_id.clone(),
-                title: session_title(session),
-                message_pair_count: session.message_history.len() / 2,
-                create_time: session.create_time,
-                update_time: session.update_time,
-            })
-            .collect::<Vec<_>>();
-        sessions.sort_by(|left, right| right.update_time.cmp(&left.update_time));
-        sessions
-    }
-
-    pub fn session_messages(&self, session_id: &str) -> Option<ChatSessionRecord> {
-        self.sessions
-            .lock()
-            .expect("会话存储锁已损坏")
-            .get(session_id)
-            .cloned()
-    }
-
-    pub fn delete_session(&self, session_id: &str) -> bool {
-        self.sessions
-            .lock()
-            .expect("会话存储锁已损坏")
-            .remove(session_id)
-            .is_some()
-    }
-}
-
-pub enum ClearResult {
-    Cleared,
-    MissingSessionId,
-    NotFound,
-}
-
-fn session_title(session: &ChatSessionRecord) -> String {
-    session
-        .message_history
-        .iter()
-        .find(|message| message.role == "user")
-        .map(|message| message.content.clone())
-        .unwrap_or_else(|| "新会话".to_string())
-}
-
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("系统时间早于 Unix 纪元")
-        .as_millis() as i64
 }

@@ -7,6 +7,12 @@ pub struct AppConfig {
     pub allowed_origin: String,
     pub request_timeout: Duration,
     pub log_filter: String,
+    pub redis_url: Option<String>,
+    pub chat_history_path: String,
+    pub session_ttl_secs: u64,
+    pub dashscope_api_key: Option<String>,
+    pub dashscope_base_url: String,
+    pub dashscope_chat_model: String,
 }
 
 impl AppConfig {
@@ -16,10 +22,24 @@ impl AppConfig {
         let allowed_origin = read_string("APP_ALLOWED_ORIGIN")?.unwrap_or_else(|| "*".to_string());
         let request_timeout_secs = read_u64("APP_REQUEST_TIMEOUT_SECS")?.unwrap_or(30);
         let log_filter = read_string("APP_LOG_FILTER")?.unwrap_or_else(|| "info".to_string());
+        let redis_url = read_string("APP_REDIS_URL")?;
+        let chat_history_path =
+            read_string("APP_CHAT_HISTORY_PATH")?.unwrap_or_else(|| "./data/chat-history".to_string());
+        let session_ttl_secs = read_u64("APP_SESSION_TTL_SECS")?.unwrap_or(3600);
+        let dashscope_api_key = read_string("DASHSCOPE_API_KEY")?;
+        let dashscope_base_url = read_string("DASHSCOPE_BASE_URL")?
+            .unwrap_or_else(|| "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string());
+        let dashscope_chat_model =
+            read_string("DASHSCOPE_CHAT_MODEL")?.unwrap_or_else(|| "qwen-plus".to_string());
 
         if request_timeout_secs == 0 {
             return Err(ConfigError::InvalidValue(
                 "APP_REQUEST_TIMEOUT_SECS 必须大于 0".to_string(),
+            ));
+        }
+        if session_ttl_secs == 0 {
+            return Err(ConfigError::InvalidValue(
+                "APP_SESSION_TTL_SECS 必须大于 0".to_string(),
             ));
         }
 
@@ -29,6 +49,12 @@ impl AppConfig {
             allowed_origin,
             request_timeout: Duration::from_secs(request_timeout_secs),
             log_filter,
+            redis_url,
+            chat_history_path,
+            session_ttl_secs,
+            dashscope_api_key,
+            dashscope_base_url,
+            dashscope_chat_model,
         })
     }
 }

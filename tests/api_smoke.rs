@@ -15,6 +15,12 @@ fn test_config() -> AppConfig {
         allowed_origin: "*".to_string(),
         request_timeout: std::time::Duration::from_secs(30),
         log_filter: "info".to_string(),
+        redis_url: None,
+        chat_history_path: "./target/test-chat-history".to_string(),
+        session_ttl_secs: 3600,
+        dashscope_api_key: None,
+        dashscope_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
+        dashscope_chat_model: "qwen-plus".to_string(),
     }
 }
 
