@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    http::{Request, StatusCode},
+    http::{header::CONTENT_TYPE, Request, StatusCode},
     response::Response,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
@@ -68,6 +68,23 @@ async fn body_json(response: Response) -> Value {
         .expect("读取响应体失败")
         .to_bytes();
     serde_json::from_slice(&body).expect("响应体不是合法的 JSON")
+}
+
+async fn body_text(response: Response) -> String {
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("读取响应体失败")
+        .to_bytes();
+    String::from_utf8(body.to_vec()).expect("响应体不是合法的 UTF-8")
+}
+
+fn sse_json_messages(body: &str) -> Vec<Value> {
+    body.lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .map(|data| serde_json::from_str(data).expect("SSE data 应是合法 JSON"))
+        .collect()
 }
 
 #[tokio::test]
@@ -139,6 +156,106 @@ async fn chat_endpoint_accepts_java_style_payload() {
     assert!(body["data"]["answer"]
         .as_str()
         .expect("响应缺少答案字段")
+        .contains("继续上次的话题"));
+}
+
+#[tokio::test]
+async fn chat_stream_endpoint_rejects_blank_message_as_sse_error() {
+    let app = app::build_router(test_config());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/chat_stream")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"Id":"session-1","Question":"   "}"#))
+                .expect("构造请求失败"),
+        )
+        .await
+        .expect("执行请求失败");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("text/event-stream;charset=UTF-8")
+    );
+
+    let body = body_text(response).await;
+    assert!(body.contains("event: message"));
+
+    let messages = sse_json_messages(&body);
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["type"], "error");
+    assert_eq!(messages[0]["data"], "问题内容不能为空");
+}
+
+#[tokio::test]
+async fn chat_stream_endpoint_accepts_java_style_payload_and_persists_history() {
+    let app = app::build_router(test_config());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/chat_stream")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"Id":"stream-session","Question":"继续上次的话题"}"#,
+                ))
+                .expect("构造请求失败"),
+        )
+        .await
+        .expect("执行请求失败");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = body_text(response).await;
+    let messages = sse_json_messages(&body);
+    assert!(messages.iter().any(|message| {
+        message["type"] == "content"
+            && message["data"]
+                .as_str()
+                .is_some_and(|data| data.contains("继续上次的话题"))
+    }));
+    assert_eq!(messages.last().expect("应返回 done 消息")["type"], "done");
+    assert!(messages.last().expect("应返回 done 消息")["data"].is_null());
+
+    let list_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/chat/sessions")
+                .body(Body::empty())
+                .expect("构造请求失败"),
+        )
+        .await
+        .expect("执行请求失败");
+    let list_body = body_json(list_response).await;
+    assert_eq!(list_body["data"][0]["sessionId"], "stream-session");
+    assert_eq!(list_body["data"][0]["messagePairCount"], 1);
+
+    let messages_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/chat/session/stream-session/messages")
+                .body(Body::empty())
+                .expect("构造请求失败"),
+        )
+        .await
+        .expect("执行请求失败");
+    let messages_body = body_json(messages_response).await;
+    assert_eq!(
+        messages_body["data"]["messageHistory"][0]["content"],
+        "继续上次的话题"
+    );
+    assert!(messages_body["data"]["messageHistory"][1]["content"]
+        .as_str()
+        .expect("应保存 assistant 回复")
         .contains("继续上次的话题"));
 }
 

@@ -93,3 +93,33 @@ impl ChatResponse {
         }
     }
 }
+
+#[derive(Serialize)]
+pub struct SseMessage {
+    #[serde(rename = "type")]
+    pub message_type: &'static str,
+    pub data: Option<String>,
+}
+
+impl SseMessage {
+    pub fn content(data: impl Into<String>) -> Self {
+        Self {
+            message_type: "content",
+            data: Some(data.into()),
+        }
+    }
+
+    pub fn error(message: impl Into<String>) -> Self {
+        Self {
+            message_type: "error",
+            data: Some(message.into()),
+        }
+    }
+
+    pub fn done() -> Self {
+        Self {
+            message_type: "done",
+            data: None,
+        }
+    }
+}

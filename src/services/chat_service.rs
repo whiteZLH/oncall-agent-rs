@@ -4,15 +4,21 @@ use crate::{
     error::AppError,
     services::vector_search_service::VectorSearchService,
 };
+use futures_util::{Stream, StreamExt};
 use rig::{
+    agent::{MultiTurnStreamItem, StreamingError},
     client::CompletionClient,
     completion::{Prompt, PromptError, ToolDefinition},
     providers::openai,
+    streaming::{StreamedAssistantContent, StreamingPrompt},
     tool::{Tool, ToolDyn},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    pin::Pin,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tracing::{info, warn};
 
 const REACT_AGENT_NAME: &str = "intelligent_assistant";
@@ -34,6 +40,14 @@ pub struct ReactAgent {
     method_tools: Vec<String>,
     tool_callbacks: Vec<String>,
     max_turns: usize,
+}
+
+pub type ChatResponseStream = Pin<Box<dyn Stream<Item = Result<ChatStreamEvent, AppError>> + Send>>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatStreamEvent {
+    Content(String),
+    Final(String),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -195,6 +209,15 @@ impl ChatService {
         Ok(answer)
     }
 
+    pub async fn stream_chat(
+        &self,
+        agent: &ReactAgent,
+        question: &str,
+    ) -> Result<ChatResponseStream, AppError> {
+        info!("执行 ReactAgent.stream_prompt() - 自动处理工具调用");
+        self.stream_agent(agent, question).await
+    }
+
     async fn call_agent(&self, agent: &ReactAgent, question: &str) -> Result<String, AppError> {
         let Some(api_key) = self.api_key.as_ref() else {
             let answer = format!("oncall-agent-rs received: {}", question);
@@ -224,6 +247,62 @@ impl ChatService {
             .await
             .map_err(|error| map_prompt_error(error, agent.max_turns))?;
         Ok(answer)
+    }
+
+    async fn stream_agent(
+        &self,
+        agent: &ReactAgent,
+        question: &str,
+    ) -> Result<ChatResponseStream, AppError> {
+        let Some(api_key) = self.api_key.as_ref() else {
+            let answer = format!("oncall-agent-rs received: {}", question);
+            return Ok(Box::pin(async_stream::stream! {
+                yield Ok(ChatStreamEvent::Content(answer.clone()));
+                yield Ok(ChatStreamEvent::Final(answer));
+            }));
+        };
+
+        let client = openai::Client::builder()
+            .api_key(api_key)
+            .base_url(&self.base_url)
+            .build()
+            .map_err(|error| {
+                AppError::internal(format!("初始化 rig OpenAI client 失败: {error}"))
+            })?;
+
+        let runtime_agent = client
+            .agent(&agent.model)
+            .name(&agent.name)
+            .preamble(&agent.system_prompt)
+            .default_max_turns(agent.max_turns)
+            .tools(self.build_method_tools())
+            .build();
+
+        let mut response_stream = runtime_agent
+            .stream_prompt(question.to_string())
+            .multi_turn(agent.max_turns)
+            .await;
+        let max_turns = agent.max_turns;
+
+        Ok(Box::pin(async_stream::stream! {
+            while let Some(item) = response_stream.next().await {
+                match item {
+                    Ok(MultiTurnStreamItem::StreamAssistantItem(
+                        StreamedAssistantContent::Text(text),
+                    )) => {
+                        yield Ok(ChatStreamEvent::Content(text.text));
+                    }
+                    Ok(MultiTurnStreamItem::FinalResponse(response)) => {
+                        yield Ok(ChatStreamEvent::Final(response.response().to_string()));
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        yield Err(map_streaming_error(error, max_turns));
+                        break;
+                    }
+                }
+            }
+        }))
     }
 }
 
@@ -322,16 +401,29 @@ fn map_prompt_error(error: PromptError, max_turns: usize) -> AppError {
     }
 }
 
+fn map_streaming_error(error: StreamingError, max_turns: usize) -> AppError {
+    match error {
+        StreamingError::Prompt(error) => map_prompt_error(*error, max_turns),
+        StreamingError::Completion(error) => {
+            AppError::internal(format!("rig agent 流式调用失败: {error}"))
+        }
+        StreamingError::Tool(error) => {
+            AppError::internal(format!("rig agent 工具调用失败: {error}"))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        ChatService, GetCurrentDateTimeArgs, GetCurrentDateTimeTool, QueryInternalDocsArgs,
-        QueryInternalDocsTool,
+        ChatService, ChatStreamEvent, GetCurrentDateTimeArgs, GetCurrentDateTimeTool,
+        QueryInternalDocsArgs, QueryInternalDocsTool,
     };
     use crate::{
         config::AppConfig,
         domain::{chat::ChatMessage, memory::PrivateMemorySearchResult},
     };
+    use futures_util::StreamExt;
     use rig::tool::Tool;
     use serde_json::Value;
     use std::{net::Ipv4Addr, time::Duration};
@@ -459,5 +551,48 @@ mod tests {
             .expect("无 API key 时也应返回占位答案");
 
         assert!(answer.contains("继续上次的话题"));
+    }
+
+    #[tokio::test]
+    async fn stream_chat_without_api_key_emits_placeholder_content() {
+        let service = ChatService::new(&test_config());
+        let agent = service.create_react_agent("qwen-plus", "prompt");
+
+        let mut stream = service
+            .stream_chat(&agent, "继续上次的话题")
+            .await
+            .expect("无 API key 时应返回流式占位答案");
+        let mut content_chunks = Vec::new();
+
+        while let Some(item) = stream.next().await {
+            if let ChatStreamEvent::Content(chunk) = item.expect("流式事件应成功") {
+                content_chunks.push(chunk);
+            }
+        }
+
+        assert!(!content_chunks.is_empty());
+        assert!(content_chunks.join("").contains("继续上次的话题"));
+    }
+
+    #[tokio::test]
+    async fn stream_chat_final_matches_streamed_content_without_api_key() {
+        let service = ChatService::new(&test_config());
+        let agent = service.create_react_agent("qwen-plus", "prompt");
+
+        let mut stream = service
+            .stream_chat(&agent, "继续上次的话题")
+            .await
+            .expect("无 API key 时应返回流式占位答案");
+        let mut streamed_content = String::new();
+        let mut final_answer = None;
+
+        while let Some(item) = stream.next().await {
+            match item.expect("流式事件应成功") {
+                ChatStreamEvent::Content(chunk) => streamed_content.push_str(&chunk),
+                ChatStreamEvent::Final(answer) => final_answer = Some(answer),
+            }
+        }
+
+        assert_eq!(final_answer.as_deref(), Some(streamed_content.as_str()));
     }
 }
