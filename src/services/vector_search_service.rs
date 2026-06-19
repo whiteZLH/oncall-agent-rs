@@ -328,6 +328,7 @@ mod tests {
             dashscope_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
             dashscope_api_base_url: "https://dashscope.aliyuncs.com/api/v1".to_string(),
             dashscope_chat_model: "qwen-plus".to_string(),
+            chat_agent_max_turns: 6,
             dashscope_embedding_model: "text-embedding-v4".to_string(),
             dashscope_rerank_model: "gte-rerank".to_string(),
             dashscope_rerank_url:

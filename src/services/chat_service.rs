@@ -3,7 +3,15 @@ use crate::{
     domain::{chat::ChatMessage, memory::PrivateMemorySearchResult},
     error::AppError,
 };
-use rig::{client::CompletionClient, completion::Prompt, providers::openai};
+use rig::{
+    client::CompletionClient,
+    completion::{Prompt, PromptError, ToolDefinition},
+    providers::openai,
+    tool::{Tool, ToolDyn},
+};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{info, warn};
 
 const REACT_AGENT_NAME: &str = "intelligent_assistant";
@@ -13,6 +21,7 @@ pub struct ChatService {
     api_key: Option<String>,
     base_url: String,
     model: String,
+    max_turns: usize,
 }
 
 #[derive(Clone)]
@@ -22,6 +31,25 @@ pub struct ReactAgent {
     system_prompt: String,
     method_tools: Vec<String>,
     tool_callbacks: Vec<String>,
+    max_turns: usize,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+struct ChatToolError(String);
+
+#[derive(Clone, Serialize, Deserialize)]
+struct GetCurrentDateTimeTool;
+
+#[derive(Clone, Serialize, Deserialize)]
+struct GetCurrentDateTimeArgs {}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct QueryInternalDocsTool;
+
+#[derive(Clone, Deserialize)]
+struct QueryInternalDocsArgs {
+    query: String,
 }
 
 impl ChatService {
@@ -30,11 +58,22 @@ impl ChatService {
             api_key: config.dashscope_api_key.clone(),
             base_url: config.dashscope_base_url.clone(),
             model: config.dashscope_chat_model.clone(),
+            max_turns: config.chat_agent_max_turns,
         }
     }
 
     pub fn build_method_tools_array(&self) -> Vec<String> {
-        Vec::new()
+        self.build_method_tools()
+            .iter()
+            .map(|tool| tool.name())
+            .collect()
+    }
+
+    fn build_method_tools(&self) -> Vec<Box<dyn ToolDyn>> {
+        vec![
+            Box::new(GetCurrentDateTimeTool),
+            Box::new(QueryInternalDocsTool),
+        ]
     }
 
     pub fn get_tool_callbacks(&self) -> Vec<String> {
@@ -119,13 +158,15 @@ impl ChatService {
             system_prompt: system_prompt.to_string(),
             method_tools: self.build_method_tools_array(),
             tool_callbacks: self.get_tool_callbacks(),
+            max_turns: self.max_turns,
         };
         info!(
-            "创建 ReactAgent - name: {}, model: {}, method_tools: {}, tools: {}",
+            "创建 ReactAgent - name: {}, model: {}, method_tools: {}, tools: {}, max_turns: {}",
             agent.name,
             agent.model,
             agent.method_tools.len(),
-            agent.tool_callbacks.len()
+            agent.tool_callbacks.len(),
+            agent.max_turns
         );
         agent
     }
@@ -158,24 +199,104 @@ impl ChatService {
 
         let runtime_agent = client
             .agent(&agent.model)
+            .name(&agent.name)
             .preamble(&agent.system_prompt)
+            .default_max_turns(agent.max_turns)
+            .tools(self.build_method_tools())
             .build();
 
         let answer = runtime_agent
             .prompt(question)
+            .max_turns(agent.max_turns)
+            .with_tool_concurrency(1)
             .await
-            .map_err(|error| AppError::internal(format!("rig agent 调用失败: {error}")))?;
+            .map_err(|error| map_prompt_error(error, agent.max_turns))?;
         Ok(answer)
+    }
+}
+
+impl Tool for GetCurrentDateTimeTool {
+    const NAME: &'static str = "getCurrentDateTime";
+
+    type Error = ChatToolError;
+    type Args = GetCurrentDateTimeArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: "Get the current date and time in the user's timezone".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {},
+            }),
+        }
+    }
+
+    async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| ChatToolError(format!("系统时间早于 Unix 纪元: {error}")))?;
+        Ok(format!("unix_timestamp_seconds={}", now.as_secs()))
+    }
+}
+
+impl Tool for QueryInternalDocsTool {
+    const NAME: &'static str = "queryInternalDocs";
+
+    type Error = ChatToolError;
+    type Args = QueryInternalDocsArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: "Use this tool to search internal documentation and knowledge base for relevant information. This Rust migration placeholder does not search private memory and only reports that the ordinary document RAG store is not migrated yet.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query describing what information you are looking for"
+                    }
+                },
+                "required": ["query"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        Ok(json!({
+            "status": "no_results",
+            "message": "No relevant documents found in the knowledge base.",
+            "detail": "Ordinary internal document RAG has not been migrated in oncall-agent-rs yet.",
+            "query": args.query,
+        })
+        .to_string())
+    }
+}
+
+fn map_prompt_error(error: PromptError, max_turns: usize) -> AppError {
+    match error {
+        PromptError::MaxTurnsError { .. } => AppError::internal(format!(
+            "rig agent 调用失败: reached max turn limit: {max_turns}"
+        )),
+        error => AppError::internal(format!("rig agent 调用失败: {error}")),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ChatService;
+    use super::{
+        ChatService, GetCurrentDateTimeArgs, GetCurrentDateTimeTool, QueryInternalDocsArgs,
+        QueryInternalDocsTool,
+    };
     use crate::{
         config::AppConfig,
         domain::{chat::ChatMessage, memory::PrivateMemorySearchResult},
     };
+    use rig::tool::Tool;
+    use serde_json::Value;
     use std::{net::Ipv4Addr, time::Duration};
 
     fn test_config() -> AppConfig {
@@ -192,6 +313,7 @@ mod tests {
             dashscope_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
             dashscope_api_base_url: "https://dashscope.aliyuncs.com/api/v1".to_string(),
             dashscope_chat_model: "qwen-plus".to_string(),
+            chat_agent_max_turns: 6,
             dashscope_embedding_model: "text-embedding-v4".to_string(),
             dashscope_rerank_model: "gte-rerank".to_string(),
             dashscope_rerank_url:
@@ -232,8 +354,47 @@ mod tests {
         assert_eq!(agent.name, "intelligent_assistant");
         assert_eq!(agent.model, "qwen-plus");
         assert_eq!(agent.system_prompt, "prompt-with-history");
-        assert!(agent.method_tools.is_empty());
+        assert_eq!(agent.max_turns, 6);
+        assert_eq!(
+            agent.method_tools,
+            vec![
+                "getCurrentDateTime".to_string(),
+                "queryInternalDocs".to_string()
+            ]
+        );
         assert!(agent.tool_callbacks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_current_datetime_tool_returns_non_empty_time() {
+        let tool = GetCurrentDateTimeTool;
+        let definition = tool.definition(String::new()).await;
+
+        assert_eq!(definition.name, "getCurrentDateTime");
+        let output = tool
+            .call(GetCurrentDateTimeArgs {})
+            .await
+            .expect("时间工具应返回当前时间");
+
+        assert!(!output.trim().is_empty());
+    }
+
+    #[tokio::test]
+    async fn query_internal_docs_tool_returns_no_results_placeholder() {
+        let tool = QueryInternalDocsTool;
+        let definition = tool.definition(String::new()).await;
+
+        assert_eq!(definition.name, "queryInternalDocs");
+        let output = tool
+            .call(QueryInternalDocsArgs {
+                query: "cpu runbook".to_string(),
+            })
+            .await
+            .expect("文档工具占位应返回 JSON");
+        let payload: Value = serde_json::from_str(&output).expect("工具输出应是 JSON");
+
+        assert_eq!(payload["status"], "no_results");
+        assert_eq!(payload["query"], "cpu runbook");
     }
 
     #[tokio::test]

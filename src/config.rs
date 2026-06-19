@@ -14,6 +14,7 @@ pub struct AppConfig {
     pub dashscope_base_url: String,
     pub dashscope_api_base_url: String,
     pub dashscope_chat_model: String,
+    pub chat_agent_max_turns: usize,
     pub dashscope_embedding_model: String,
     pub dashscope_rerank_model: String,
     pub dashscope_rerank_url: String,
@@ -40,6 +41,7 @@ impl AppConfig {
             .unwrap_or_else(|| "https://dashscope.aliyuncs.com/api/v1".to_string());
         let dashscope_chat_model =
             read_string("DASHSCOPE_CHAT_MODEL")?.unwrap_or_else(|| "qwen-plus".to_string());
+        let chat_agent_max_turns = read_usize("APP_CHAT_AGENT_MAX_TURNS")?.unwrap_or(6);
         let dashscope_embedding_model = read_string("DASHSCOPE_EMBEDDING_MODEL")?
             .unwrap_or_else(|| "text-embedding-v4".to_string());
         let dashscope_rerank_model =
@@ -70,6 +72,11 @@ impl AppConfig {
                 "APP_PRIVATE_MEMORY_RECALL_TOP_K 必须大于 0".to_string(),
             ));
         }
+        if chat_agent_max_turns == 0 {
+            return Err(ConfigError::InvalidValue(
+                "APP_CHAT_AGENT_MAX_TURNS 必须大于 0".to_string(),
+            ));
+        }
 
         Ok(Self {
             host,
@@ -84,6 +91,7 @@ impl AppConfig {
             dashscope_base_url,
             dashscope_api_base_url,
             dashscope_chat_model,
+            chat_agent_max_turns,
             dashscope_embedding_model,
             dashscope_rerank_model,
             dashscope_rerank_url,
