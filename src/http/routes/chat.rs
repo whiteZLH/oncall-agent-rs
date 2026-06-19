@@ -1,5 +1,4 @@
 use crate::{
-    domain::chat::ChatMessage,
     domain::chat::{ChatSessionRecord, ChatSessionSummary, SessionInfoResponse},
     http::dto::{ApiResponse, ChatRequest, ChatResponse, ClearRequest},
     services::session_manager::{ClearResult, SessionInfo},
@@ -44,7 +43,7 @@ async fn chat(
         )));
     }
 
-    let session = state
+    let mut session = state
         .session_manager
         .get_or_create_session(payload.id.as_deref());
     let history = session.get_history();
@@ -61,24 +60,23 @@ async fn chat(
         .chat_service
         .build_system_prompt(&history, &private_memories);
 
-
-    
-
-    let answer = match state
+    let agent = state
         .chat_service
-        .execute_chat(&session_id, question, &system_prompt)
-        .await
-    {
+        .create_react_agent(state.chat_service.chat_model(), &system_prompt);
+
+    let answer = match state.chat_service.execute_chat(&agent, question).await {
         Ok(answer) => answer,
         Err(error) => {
             return Json(ApiResponse::success(ChatResponse::error(error.to_string())));
         }
     };
 
-    let evicted_messages = state
-        .session_manager
-        .record_exchange(&session_id, question, &answer);
-    trigger_memory_extraction(&state, &session_id, evicted_messages);
+    session.add_message(question, &answer, &state.session_manager);
+    info!(
+        "已更新会话历史 - SessionId: {}, 当前消息对数: {}",
+        session_id,
+        session.get_message_pair_count()
+    );
 
     Json(ApiResponse::success(ChatResponse::success(answer)))
 }
@@ -161,28 +159,4 @@ async fn search_private_memories(
             Vec::new()
         }
     }
-}
-
-fn trigger_memory_extraction(
-    state: &Arc<AppState>,
-    session_id: &str,
-    evicted_messages: Vec<ChatMessage>,
-) {
-    if evicted_messages.is_empty() {
-        return;
-    }
-
-    let memory_extraction_service = state.memory_extraction_service.clone();
-    let session_id = session_id.to_string();
-    tokio::spawn(async move {
-        if let Err(error) = memory_extraction_service
-            .extract_and_store(&session_id, &evicted_messages)
-            .await
-        {
-            warn!(
-                "提炼长期记忆失败: session_id={}, error={}",
-                session_id, error
-            );
-        }
-    });
 }

@@ -64,7 +64,11 @@ impl MemoryExtractionService {
             }
 
             let content = format!("[用户私人记忆] {fact}");
-            let embedding = self.vector_search_service.generate_embedding(&content).await.ok();
+            let embedding = self
+                .vector_search_service
+                .generate_embedding(&content)
+                .await
+                .ok();
             self.vector_search_service.append_memory(
                 session_id,
                 StoredMemory {
@@ -84,12 +88,18 @@ impl MemoryExtractionService {
         Ok(())
     }
 
-    async fn extract_facts_from_conversation(&self, conversation: &str) -> Result<String, AppError> {
+    async fn extract_facts_from_conversation(
+        &self,
+        conversation: &str,
+    ) -> Result<String, AppError> {
         let api_key = self
             .api_key
             .as_ref()
             .ok_or_else(|| AppError::internal("DASHSCOPE_API_KEY 未配置"))?;
-        let url = format!("{}/chat/completions", self.chat_base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/chat/completions",
+            self.chat_base_url.trim_end_matches('/')
+        );
         let body = json!({
             "model": self.chat_model,
             "messages": [

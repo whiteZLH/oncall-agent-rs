@@ -1,8 +1,4 @@
-use crate::{
-    config::AppConfig,
-    domain::memory::PrivateMemorySearchResult,
-    error::AppError,
-};
+use crate::{config::AppConfig, domain::memory::PrivateMemorySearchResult, error::AppError};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -53,7 +49,9 @@ impl VectorSearchService {
             .into_iter()
             .map(|record| {
                 let score = match query_embedding.as_ref().zip(record.embedding.as_ref()) {
-                    Some((query_vector, memory_vector)) if query_vector.len() == memory_vector.len() => {
+                    Some((query_vector, memory_vector))
+                        if query_vector.len() == memory_vector.len() =>
+                    {
                         cosine_similarity(query_vector, memory_vector)
                     }
                     _ => lexical_score(query, &record.content),
@@ -62,7 +60,8 @@ impl VectorSearchService {
                     id: record.id,
                     content: record.content,
                     score,
-                    metadata: serde_json::to_string(&record.metadata).unwrap_or_else(|_| "{}".to_string()),
+                    metadata: serde_json::to_string(&record.metadata)
+                        .unwrap_or_else(|_| "{}".to_string()),
                 }
             })
             .collect::<Vec<_>>();
@@ -124,7 +123,9 @@ impl VectorSearchService {
         }
 
         let Some(items) = payload["output"]["embeddings"].as_array() else {
-            return Err(AppError::internal("embedding 响应缺少 output.embeddings 数组"));
+            return Err(AppError::internal(
+                "embedding 响应缺少 output.embeddings 数组",
+            ));
         };
         let Some(first) = items.first() else {
             return Err(AppError::internal("embedding 响应 embeddings 为空"));
@@ -203,7 +204,9 @@ impl VectorSearchService {
             reranked.push(PrivateMemorySearchResult {
                 id: candidate.id.clone(),
                 content: candidate.content.clone(),
-                score: item["relevance_score"].as_f64().unwrap_or(candidate.score as f64) as f32,
+                score: item["relevance_score"]
+                    .as_f64()
+                    .unwrap_or(candidate.score as f64) as f32,
                 metadata: candidate.metadata.clone(),
             });
         }
@@ -266,7 +269,11 @@ fn lexical_score(query: &str, content: &str) -> f32 {
     let normalized_content = content.to_lowercase();
     let mut hits = 0.0f32;
     let mut total = 0.0f32;
-    for ch in query.to_lowercase().chars().filter(|ch| !ch.is_whitespace()) {
+    for ch in query
+        .to_lowercase()
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+    {
         total += 1.0;
         if normalized_content.contains(ch) {
             hits += 1.0;
@@ -334,9 +341,10 @@ mod tests {
 
     #[tokio::test]
     async fn search_session_memories_reads_local_private_memories() {
-        let store_path = std::env::temp_dir()
-            .join(format!("oncall-agent-rs-private-memory-{}", Uuid::new_v4()));
-        let service = VectorSearchService::new(&test_config(store_path.to_string_lossy().to_string()));
+        let store_path =
+            std::env::temp_dir().join(format!("oncall-agent-rs-private-memory-{}", Uuid::new_v4()));
+        let service =
+            VectorSearchService::new(&test_config(store_path.to_string_lossy().to_string()));
 
         service
             .append_memory(

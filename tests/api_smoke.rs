@@ -25,7 +25,8 @@ fn test_config() -> AppConfig {
         dashscope_embedding_model: "text-embedding-v4".to_string(),
         dashscope_rerank_model: "gte-rerank".to_string(),
         dashscope_rerank_url:
-            "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank".to_string(),
+            "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+                .to_string(),
         private_memory_recall_enabled: true,
         private_memory_recall_top_k: 3,
         private_memory_store_path: "./target/test-private-memories".to_string(),

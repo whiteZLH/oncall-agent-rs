@@ -3,8 +3,7 @@ use crate::{
     http::routes::{chat, health, incidents, metrics},
     services::{
         chat_service::ChatService, incident_service::IncidentService,
-        memory_extraction_service::MemoryExtractionService,
-        session_manager::SessionManager,
+        memory_extraction_service::MemoryExtractionService, session_manager::SessionManager,
         vector_search_service::VectorSearchService,
     },
     state::AppState,

@@ -1,6 +1,7 @@
 use crate::{
     config::AppConfig,
     domain::chat::{ChatMessage, ChatSessionRecord, ChatSessionSummary, SessionInfoResponse},
+    services::memory_extraction_service::MemoryExtractionService,
 };
 use redis::Commands;
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,7 @@ use std::{
     sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 const MAX_WINDOW_SIZE: usize = 6;
@@ -20,6 +22,7 @@ pub struct SessionManager {
     redis_url: Option<String>,
     chat_history_path: PathBuf,
     session_ttl_secs: u64,
+    memory_extraction_service: MemoryExtractionService,
 }
 
 impl SessionManager {
@@ -48,6 +51,7 @@ impl SessionManager {
             redis_url: config.redis_url.clone(),
             chat_history_path: PathBuf::from(&config.chat_history_path),
             session_ttl_secs: config.session_ttl_secs,
+            memory_extraction_service: MemoryExtractionService::new(config),
         }
     }
 
@@ -81,34 +85,12 @@ impl SessionManager {
         session
     }
 
-    pub fn record_exchange(&self, session_id: &str, question: &str, answer: &str) -> Vec<ChatMessage> {
-        let mut sessions = self.sessions.lock().expect("会话存储锁已损坏");
-        let now = now_millis();
-        let session = sessions
-            .entry(session_id.to_string())
-            .or_insert_with(|| SessionInfo::new(session_id.to_string()));
-        let mut evicted_messages = Vec::new();
-        session.message_history.push(ChatMessage {
-            role: "user".to_string(),
-            content: question.to_string(),
-        });
-        session.message_history.push(ChatMessage {
-            role: "assistant".to_string(),
-            content: answer.to_string(),
-        });
-        let max_messages = MAX_WINDOW_SIZE * 2;
-        while session.message_history.len() > max_messages {
-            evicted_messages.push(session.message_history.remove(0));
-            if !session.message_history.is_empty() {
-                evicted_messages.push(session.message_history.remove(0));
-            }
-        }
-        session.update_time = now;
-        drop(sessions);
-
-        self.save_to_redis(&self.get_or_create_session(Some(session_id)));
-        self.append_to_history_store(session_id, question, answer);
-        evicted_messages
+    pub fn save_session(&self, session: &SessionInfo) {
+        self.sessions
+            .lock()
+            .expect("会话存储锁已损坏")
+            .insert(session.session_id.clone(), session.clone());
+        self.save_to_redis(session);
     }
 
     pub fn clear(&self, session_id: &str) -> ClearResult {
@@ -269,15 +251,21 @@ impl SessionManager {
         Some(SessionInfo::from_record(record))
     }
 
-    fn append_to_history_store(&self, session_id: &str, question: &str, answer: &str) {
+    fn append_to_history_store(
+        &self,
+        session_id: &str,
+        create_time: i64,
+        question: &str,
+        answer: &str,
+    ) {
         if fs::create_dir_all(&self.chat_history_path).is_err() {
             return;
         }
 
         let path = self.chat_history_path.join(format!("{session_id}.json"));
-        let mut record = self
-            .load_from_history_store(session_id)
-            .unwrap_or_else(|| SessionInfo::new(session_id.to_string()));
+        let mut record = self.load_from_history_store(session_id).unwrap_or_else(|| {
+            SessionInfo::with_parts(session_id.to_string(), create_time, Vec::new())
+        });
 
         record.message_history.push(ChatMessage {
             role: "user".to_string(),
@@ -293,6 +281,31 @@ impl SessionManager {
             return;
         };
         let _ = fs::write(path, json);
+    }
+
+    // 触发异步的记忆提炼
+    pub fn trigger_memory_extraction(
+        &self,
+        session_id: &str,
+        history_to_archive: Vec<ChatMessage>,
+    ) {
+        if history_to_archive.is_empty() {
+            return;
+        }
+
+        let memory_extraction_service = self.memory_extraction_service.clone();
+        let session_id = session_id.to_string();
+        tokio::spawn(async move {
+            if let Err(error) = memory_extraction_service
+                .extract_and_store(&session_id, &history_to_archive)
+                .await
+            {
+                warn!(
+                    "提炼长期记忆失败: session_id={}, error={}",
+                    session_id, error
+                );
+            }
+        });
     }
 
     fn delete_persisted_history(&self, session_id: &str) {
@@ -346,7 +359,11 @@ impl SessionInfo {
     }
 
     fn from_record(record: ChatSessionRecord) -> Self {
-        let mut session = Self::with_parts(record.session_id, record.create_time, record.message_history);
+        let mut session = Self::with_parts(
+            record.session_id,
+            record.create_time,
+            record.message_history,
+        );
         session.update_time = record.update_time;
         session
     }
@@ -366,6 +383,53 @@ impl SessionInfo {
 
     pub fn get_history(&self) -> Vec<ChatMessage> {
         self.message_history.clone()
+    }
+
+    pub fn add_message(&mut self, user_question: &str, ai_answer: &str, manager: &SessionManager) {
+        let mut evicted_messages = Vec::new();
+
+        // 添加用户消息
+        self.message_history.push(ChatMessage {
+            role: "user".to_string(),
+            content: user_question.to_string(),
+        });
+        // 添加AI回复
+        self.message_history.push(ChatMessage {
+            role: "assistant".to_string(),
+            content: ai_answer.to_string(),
+        });
+
+        // 自动清理：保持最多 MAX_WINDOW_SIZE 对消息
+        let max_messages = MAX_WINDOW_SIZE * 2;
+        while self.message_history.len() > max_messages {
+            evicted_messages.push(self.message_history.remove(0)); // 删除最旧的用户消息
+            if !self.message_history.is_empty() {
+                evicted_messages.push(self.message_history.remove(0)); // 删除对应的AI回复
+            }
+        }
+
+        self.update_time = now_millis();
+        debug!(
+            "会话 {} 更新历史消息，当前消息对数: {}",
+            self.session_id,
+            self.message_history.len() / 2
+        );
+
+        manager.append_to_history_store(
+            &self.session_id,
+            self.create_time,
+            user_question,
+            ai_answer,
+        );
+        manager.save_session(self);
+
+        if !evicted_messages.is_empty() {
+            manager.trigger_memory_extraction(&self.session_id, evicted_messages);
+        }
+    }
+
+    pub fn get_message_pair_count(&self) -> usize {
+        self.message_history.len() / 2
     }
 }
 
@@ -418,5 +482,8 @@ fn recent_window(history: Vec<ChatMessage>) -> Vec<ChatMessage> {
     if history_len <= max_messages {
         return history;
     }
-    history.into_iter().skip(history_len - max_messages).collect()
+    history
+        .into_iter()
+        .skip(history_len - max_messages)
+        .collect()
 }

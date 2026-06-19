@@ -30,8 +30,8 @@ impl AppConfig {
         let request_timeout_secs = read_u64("APP_REQUEST_TIMEOUT_SECS")?.unwrap_or(30);
         let log_filter = read_string("APP_LOG_FILTER")?.unwrap_or_else(|| "info".to_string());
         let redis_url = read_string("APP_REDIS_URL")?;
-        let chat_history_path =
-            read_string("APP_CHAT_HISTORY_PATH")?.unwrap_or_else(|| "./data/chat-history".to_string());
+        let chat_history_path = read_string("APP_CHAT_HISTORY_PATH")?
+            .unwrap_or_else(|| "./data/chat-history".to_string());
         let session_ttl_secs = read_u64("APP_SESSION_TTL_SECS")?.unwrap_or(3600);
         let dashscope_api_key = read_string("DASHSCOPE_API_KEY")?;
         let dashscope_base_url = read_string("DASHSCOPE_BASE_URL")?
@@ -40,12 +40,14 @@ impl AppConfig {
             .unwrap_or_else(|| "https://dashscope.aliyuncs.com/api/v1".to_string());
         let dashscope_chat_model =
             read_string("DASHSCOPE_CHAT_MODEL")?.unwrap_or_else(|| "qwen-plus".to_string());
-        let dashscope_embedding_model =
-            read_string("DASHSCOPE_EMBEDDING_MODEL")?.unwrap_or_else(|| "text-embedding-v4".to_string());
+        let dashscope_embedding_model = read_string("DASHSCOPE_EMBEDDING_MODEL")?
+            .unwrap_or_else(|| "text-embedding-v4".to_string());
         let dashscope_rerank_model =
             read_string("DASHSCOPE_RERANK_MODEL")?.unwrap_or_else(|| "gte-rerank".to_string());
-        let dashscope_rerank_url = read_string("DASHSCOPE_RERANK_URL")?
-            .unwrap_or_else(|| "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank".to_string());
+        let dashscope_rerank_url = read_string("DASHSCOPE_RERANK_URL")?.unwrap_or_else(|| {
+            "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+                .to_string()
+        });
         let private_memory_recall_enabled =
             read_bool("APP_PRIVATE_MEMORY_RECALL_ENABLED")?.unwrap_or(true);
         let private_memory_recall_top_k =
