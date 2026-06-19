@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 axum = { version = "0.8", features = ["multipart"] }
+base64 = "0.22"
 redis = "0.32"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rig-core = "0.36"

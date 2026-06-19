@@ -1,3 +1,4 @@
+pub mod chat_history_store;
 pub mod chat_service;
 pub mod document_chunk_service;
 pub mod incident_service;

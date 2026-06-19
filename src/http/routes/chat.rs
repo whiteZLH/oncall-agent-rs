@@ -1,7 +1,7 @@
 use crate::{
     domain::chat::{ChatSessionRecord, ChatSessionSummary, SessionInfoResponse},
     http::dto::{ApiResponse, ChatRequest, ChatResponse, ClearRequest},
-    services::session_manager::{ClearResult, SessionInfo},
+    services::session_manager::SessionInfo,
     state::AppState,
 };
 use axum::{
@@ -89,11 +89,16 @@ async fn clear_chat_history(
         return Json(ApiResponse::error(500, "会话ID不能为空"));
     };
 
-    match state.session_manager.clear(session_id) {
-        ClearResult::Cleared => Json(ApiResponse::success_message("会话历史已清空")),
-        ClearResult::MissingSessionId => Json(ApiResponse::error(500, "会话ID不能为空")),
-        ClearResult::NotFound => Json(ApiResponse::error(500, "会话不存在")),
+    if session_id.trim().is_empty() {
+        return Json(ApiResponse::error(500, "会话ID不能为空"));
     }
+
+    let Some(mut session) = state.session_manager.get_session(session_id) else {
+        return Json(ApiResponse::error(500, "会话不存在"));
+    };
+
+    session.clear_history(&state.session_manager);
+    Json(ApiResponse::success_message("会话历史已清空"))
 }
 
 async fn get_session_info(

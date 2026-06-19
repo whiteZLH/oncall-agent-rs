@@ -3,9 +3,15 @@ use axum::{
     http::{Request, StatusCode},
     response::Response,
 };
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use http_body_util::BodyExt;
 use oncall_agent_rs::{app, config::AppConfig};
 use serde_json::Value;
+use std::{
+    fs,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tower::util::ServiceExt;
 
 fn test_config() -> AppConfig {
@@ -16,7 +22,7 @@ fn test_config() -> AppConfig {
         request_timeout: std::time::Duration::from_secs(30),
         log_filter: "info".to_string(),
         redis_url: None,
-        chat_history_path: "./target/test-chat-history".to_string(),
+        chat_history_path: unique_target_path("chat-history").display().to_string(),
         session_ttl_secs: 3600,
         dashscope_api_key: None,
         dashscope_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
@@ -44,6 +50,14 @@ fn test_config() -> AppConfig {
         private_memory_recall_top_k: 3,
         private_memory_store_path: "./target/test-private-memories".to_string(),
     }
+}
+
+fn unique_target_path(name: &str) -> PathBuf {
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("系统时间早于 Unix 纪元")
+        .as_nanos();
+    PathBuf::from(format!("./target/test-{name}-{suffix}"))
 }
 
 async fn body_json(response: Response) -> Value {
@@ -132,6 +146,37 @@ async fn chat_endpoint_accepts_java_style_payload() {
 async fn chat_session_endpoints_match_java_contract() {
     let app = app::build_router(test_config());
 
+    let empty_list_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/chat/sessions")
+                .body(Body::empty())
+                .expect("构造请求失败"),
+        )
+        .await
+        .expect("执行请求失败");
+    assert_eq!(empty_list_response.status(), StatusCode::OK);
+    let empty_list_body = body_json(empty_list_response).await;
+    assert_eq!(empty_list_body["data"].as_array().unwrap().len(), 0);
+
+    let chat_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/chat")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"Id":"session-1","Question":"继续上次的话题"}"#,
+                ))
+                .expect("构造请求失败"),
+        )
+        .await
+        .expect("执行请求失败");
+    let chat_body = body_json(chat_response).await;
+    assert_eq!(chat_body["data"]["success"], true);
+
     let list_response = app
         .clone()
         .oneshot(
@@ -142,7 +187,6 @@ async fn chat_session_endpoints_match_java_contract() {
         )
         .await
         .expect("执行请求失败");
-    assert_eq!(list_response.status(), StatusCode::OK);
     let list_body = body_json(list_response).await;
     assert_eq!(list_body["data"][0]["sessionId"], "session-1");
     assert_eq!(list_body["data"][0]["messagePairCount"], 1);
@@ -174,6 +218,7 @@ async fn chat_session_endpoints_match_java_contract() {
     assert_eq!(messages_body["data"]["messageHistory"][0]["role"], "user");
 
     let clear_response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -186,6 +231,19 @@ async fn chat_session_endpoints_match_java_contract() {
         .expect("执行请求失败");
     let clear_body = body_json(clear_response).await;
     assert_eq!(clear_body["message"], "会话历史已清空");
+
+    let delete_response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/chat/session/session-1")
+                .body(Body::empty())
+                .expect("构造请求失败"),
+        )
+        .await
+        .expect("执行请求失败");
+    let delete_body = body_json(delete_response).await;
+    assert_eq!(delete_body["message"], "会话已删除");
 }
 
 #[tokio::test]
@@ -219,6 +277,74 @@ async fn chat_session_missing_paths_return_java_style_errors() {
         .expect("执行请求失败");
     let missing_body = body_json(missing_response).await;
     assert_eq!(missing_body["message"], "会话不存在");
+}
+
+#[tokio::test]
+async fn clear_chat_history_loads_persisted_session_like_java() {
+    let mut config = test_config();
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("系统时间早于 Unix 纪元")
+        .as_nanos();
+    config.chat_history_path = format!("./target/test-chat-history-clear-{suffix}");
+
+    let session_id = "persisted-session";
+    let history_dir = PathBuf::from(&config.chat_history_path);
+    fs::create_dir_all(&history_dir).expect("创建测试历史目录失败");
+    let history_path = history_dir.join(format!(
+        "{}.json",
+        URL_SAFE_NO_PAD.encode(session_id.as_bytes())
+    ));
+    fs::write(
+        &history_path,
+        r#"{
+  "sessionId": "persisted-session",
+  "createTime": 1718559600000,
+  "updateTime": 1718559601000,
+  "messageHistory": [
+    { "role": "user", "content": "old question" },
+    { "role": "assistant", "content": "old answer" }
+  ]
+}"#,
+    )
+    .expect("写入测试历史文件失败");
+
+    let app = app::build_router(config);
+
+    let clear_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/chat/clear")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"Id":"persisted-session"}"#))
+                .expect("构造请求失败"),
+        )
+        .await
+        .expect("执行请求失败");
+    let clear_body = body_json(clear_response).await;
+    assert_eq!(clear_body["code"], 200);
+    assert_eq!(clear_body["message"], "会话历史已清空");
+    assert!(!history_path.exists());
+
+    let messages_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/chat/session/persisted-session/messages")
+                .body(Body::empty())
+                .expect("构造请求失败"),
+        )
+        .await
+        .expect("执行请求失败");
+    let messages_body = body_json(messages_response).await;
+    assert_eq!(
+        messages_body["data"]["messageHistory"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[tokio::test]
