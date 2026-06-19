@@ -28,6 +28,18 @@ fn test_config() -> AppConfig {
         dashscope_rerank_url:
             "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
                 .to_string(),
+        milvus_host: "localhost".to_string(),
+        milvus_port: 19530,
+        milvus_username: String::new(),
+        milvus_password: String::new(),
+        milvus_database: "default".to_string(),
+        milvus_timeout_ms: 10_000,
+        rag_candidate_k: 10,
+        rag_search_ef: 64,
+        upload_path: "./target/uploads".to_string(),
+        upload_allowed_extensions: vec!["txt".to_string(), "md".to_string()],
+        document_chunk_max_size: 800,
+        document_chunk_overlap: 100,
         private_memory_recall_enabled: true,
         private_memory_recall_top_k: 3,
         private_memory_store_path: "./target/test-private-memories".to_string(),
@@ -275,7 +287,11 @@ async fn incident_detail_run_and_action_endpoints_match_java_contract() {
         .await
         .expect("执行请求失败");
     let similar_body = body_json(similar_response).await;
-    assert_eq!(similar_body["data"][0]["id"], "case-1");
+    assert_eq!(similar_body["code"], 500);
+    assert!(similar_body["message"]
+        .as_str()
+        .expect("错误响应应包含 message")
+        .contains("DASHSCOPE_API_KEY"));
 
     let archive_response = app
         .clone()
@@ -289,8 +305,7 @@ async fn incident_detail_run_and_action_endpoints_match_java_contract() {
         .await
         .expect("执行请求失败");
     let archive_body = body_json(archive_response).await;
-    assert_eq!(archive_body["data"]["success"], true);
-    assert_eq!(archive_body["data"]["incidentId"], "incident-1");
+    assert_eq!(archive_body["code"], 500);
 
     let diagnose_response = app
         .oneshot(
@@ -325,4 +340,82 @@ async fn missing_incident_returns_404_api_response() {
     let body = body_json(response).await;
     assert_eq!(body["code"], 404);
     assert_eq!(body["message"], "事故不存在");
+}
+
+#[tokio::test]
+async fn knowledge_endpoints_return_java_style_contracts() {
+    let app = app::build_router(test_config());
+
+    let tasks_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/knowledge/index-tasks")
+                .body(Body::empty())
+                .expect("构造请求失败"),
+        )
+        .await
+        .expect("执行请求失败");
+    assert_eq!(tasks_response.status(), StatusCode::OK);
+    let tasks_body = body_json(tasks_response).await;
+    assert_eq!(tasks_body["code"], 200);
+    assert!(tasks_body["data"].is_array());
+
+    let blank_search_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/knowledge/search?query=%20%20%20&topK=99")
+                .body(Body::empty())
+                .expect("构造请求失败"),
+        )
+        .await
+        .expect("执行请求失败");
+    assert_eq!(blank_search_response.status(), StatusCode::BAD_REQUEST);
+    let blank_search_body = body_json(blank_search_response).await;
+    assert_eq!(blank_search_body["message"], "query 不能为空");
+}
+
+#[tokio::test]
+async fn upload_endpoint_creates_index_task() {
+    let app = app::build_router(test_config());
+    let boundary = "X-ONCALL-BOUNDARY";
+    let body = format!(
+        "--{boundary}\r\ncontent-disposition: form-data; name=\"file\"; filename=\"runbook.md\"\r\ncontent-type: text/markdown\r\n\r\n# CPU\r\n\r\ncheck cpu\r\n--{boundary}--\r\n"
+    );
+
+    let upload_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/upload")
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .expect("构造请求失败"),
+        )
+        .await
+        .expect("执行请求失败");
+    assert_eq!(upload_response.status(), StatusCode::OK);
+    let upload_body = body_json(upload_response).await;
+    assert_eq!(upload_body["data"]["fileName"], "runbook.md");
+    assert_eq!(upload_body["data"]["status"], "INDEXING");
+    let task_id = upload_body["data"]["taskId"]
+        .as_str()
+        .expect("上传响应应包含 taskId");
+
+    let status_response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/upload/status/{task_id}"))
+                .body(Body::empty())
+                .expect("构造请求失败"),
+        )
+        .await
+        .expect("执行请求失败");
+    assert_eq!(status_response.status(), StatusCode::OK);
+    let status_body = body_json(status_response).await;
+    assert_eq!(status_body["data"]["taskId"], task_id);
 }

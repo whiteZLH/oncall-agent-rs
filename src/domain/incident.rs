@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 use super::diagnosis::DiagnosisRun;
+pub use super::rag::SearchResult;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,14 +37,7 @@ pub struct IncidentRecord {
 pub struct ArchiveResult {
     pub success: bool,
     pub incident_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document_id: Option<String>,
     pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SearchResult {
-    pub id: String,
-    pub content: String,
-    pub score: f32,
-    pub metadata: String,
 }

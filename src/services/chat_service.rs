@@ -2,6 +2,7 @@ use crate::{
     config::AppConfig,
     domain::{chat::ChatMessage, memory::PrivateMemorySearchResult},
     error::AppError,
+    services::vector_search_service::VectorSearchService,
 };
 use rig::{
     client::CompletionClient,
@@ -22,6 +23,7 @@ pub struct ChatService {
     base_url: String,
     model: String,
     max_turns: usize,
+    vector_search_service: Option<VectorSearchService>,
 }
 
 #[derive(Clone)]
@@ -44,8 +46,10 @@ struct GetCurrentDateTimeTool;
 #[derive(Clone, Serialize, Deserialize)]
 struct GetCurrentDateTimeArgs {}
 
-#[derive(Clone, Serialize, Deserialize)]
-struct QueryInternalDocsTool;
+#[derive(Clone)]
+struct QueryInternalDocsTool {
+    vector_search_service: Option<VectorSearchService>,
+}
 
 #[derive(Clone, Deserialize)]
 struct QueryInternalDocsArgs {
@@ -59,7 +63,13 @@ impl ChatService {
             base_url: config.dashscope_base_url.clone(),
             model: config.dashscope_chat_model.clone(),
             max_turns: config.chat_agent_max_turns,
+            vector_search_service: None,
         }
+    }
+
+    pub fn with_vector_search(mut self, vector_search_service: VectorSearchService) -> Self {
+        self.vector_search_service = Some(vector_search_service);
+        self
     }
 
     pub fn build_method_tools_array(&self) -> Vec<String> {
@@ -72,7 +82,9 @@ impl ChatService {
     fn build_method_tools(&self) -> Vec<Box<dyn ToolDyn>> {
         vec![
             Box::new(GetCurrentDateTimeTool),
-            Box::new(QueryInternalDocsTool),
+            Box::new(QueryInternalDocsTool {
+                vector_search_service: self.vector_search_service.clone(),
+            }),
         ]
     }
 
@@ -251,7 +263,7 @@ impl Tool for QueryInternalDocsTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Use this tool to search internal documentation and knowledge base for relevant information. This Rust migration placeholder does not search private memory and only reports that the ordinary document RAG store is not migrated yet.".to_string(),
+            description: "Use this tool to search internal documentation and knowledge base for relevant information.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -266,13 +278,38 @@ impl Tool for QueryInternalDocsTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        Ok(json!({
-            "status": "no_results",
-            "message": "No relevant documents found in the knowledge base.",
-            "detail": "Ordinary internal document RAG has not been migrated in oncall-agent-rs yet.",
-            "query": args.query,
-        })
-        .to_string())
+        let Some(vector_search_service) = self.vector_search_service.as_ref() else {
+            return Ok(json!({
+                "status": "error",
+                "message": "Internal document search service is not configured.",
+                "query": args.query,
+            })
+            .to_string());
+        };
+
+        match vector_search_service
+            .search_similar_documents(&args.query, 3)
+            .await
+        {
+            Ok(results) if results.is_empty() => Ok(json!({
+                "status": "no_results",
+                "message": "No relevant documents found in the knowledge base.",
+                "query": args.query,
+            })
+            .to_string()),
+            Ok(results) => Ok(json!({
+                "status": "success",
+                "query": args.query,
+                "results": results,
+            })
+            .to_string()),
+            Err(error) => Ok(json!({
+                "status": "error",
+                "message": error.to_string(),
+                "query": args.query,
+            })
+            .to_string()),
+        }
     }
 }
 
@@ -319,6 +356,18 @@ mod tests {
             dashscope_rerank_url:
                 "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
                     .to_string(),
+            milvus_host: "localhost".to_string(),
+            milvus_port: 19530,
+            milvus_username: String::new(),
+            milvus_password: String::new(),
+            milvus_database: "default".to_string(),
+            milvus_timeout_ms: 10_000,
+            rag_candidate_k: 10,
+            rag_search_ef: 64,
+            upload_path: "./target/uploads".to_string(),
+            upload_allowed_extensions: vec!["txt".to_string(), "md".to_string()],
+            document_chunk_max_size: 800,
+            document_chunk_overlap: 100,
             private_memory_recall_enabled: true,
             private_memory_recall_top_k: 3,
             private_memory_store_path: "./target/test-private-memories".to_string(),
@@ -380,8 +429,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn query_internal_docs_tool_returns_no_results_placeholder() {
-        let tool = QueryInternalDocsTool;
+    async fn query_internal_docs_tool_returns_unconfigured_error() {
+        let tool = QueryInternalDocsTool {
+            vector_search_service: None,
+        };
         let definition = tool.definition(String::new()).await;
 
         assert_eq!(definition.name, "queryInternalDocs");
@@ -390,10 +441,10 @@ mod tests {
                 query: "cpu runbook".to_string(),
             })
             .await
-            .expect("文档工具占位应返回 JSON");
+            .expect("文档工具应返回 JSON");
         let payload: Value = serde_json::from_str(&output).expect("工具输出应是 JSON");
 
-        assert_eq!(payload["status"], "no_results");
+        assert_eq!(payload["status"], "error");
         assert_eq!(payload["query"], "cpu runbook");
     }
 

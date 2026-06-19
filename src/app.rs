@@ -1,10 +1,12 @@
 use crate::{
     config::AppConfig,
-    http::routes::{chat, health, incidents, metrics},
+    http::routes::{chat, health, incidents, knowledge, metrics, upload},
     services::{
-        chat_service::ChatService, incident_service::IncidentService,
-        memory_extraction_service::MemoryExtractionService, session_manager::SessionManager,
-        vector_search_service::VectorSearchService,
+        chat_service::ChatService, document_chunk_service::DocumentChunkService,
+        incident_service::IncidentService, index_task_status_service::IndexTaskStatusService,
+        memory_extraction_service::MemoryExtractionService, milvus_service::MilvusService,
+        session_manager::SessionManager, vector_embedding_service::VectorEmbeddingService,
+        vector_index_service::VectorIndexService, vector_search_service::VectorSearchService,
     },
     state::AppState,
 };
@@ -26,13 +28,22 @@ use tower_http::{
 pub const REQUEST_ID_HEADER: &str = "x-request-id";
 
 pub fn build_router(config: AppConfig) -> Router {
+    let vector_search_service = VectorSearchService::new(&config);
+    let chat_service = ChatService::new(&config).with_vector_search(vector_search_service.clone());
+    let vector_index_service = VectorIndexService::new(
+        VectorEmbeddingService::new(&config),
+        DocumentChunkService::new(&config),
+        MilvusService::new(&config),
+    );
     let state = Arc::new(AppState::new(
         config.clone(),
-        ChatService::new(&config),
-        VectorSearchService::new(&config),
+        chat_service,
+        vector_search_service,
         MemoryExtractionService::new(&config),
         SessionManager::new(&config),
-        IncidentService::new(),
+        IncidentService::new(&config),
+        IndexTaskStatusService::new(),
+        vector_index_service,
     ));
     let request_id_header = HeaderName::from_static(REQUEST_ID_HEADER);
     let cors = if config.allowed_origin == "*" {
@@ -49,6 +60,8 @@ pub fn build_router(config: AppConfig) -> Router {
         .merge(metrics::router())
         .merge(chat::router())
         .merge(incidents::router())
+        .merge(knowledge::router())
+        .merge(upload::router())
         .layer(PropagateRequestIdLayer::new(request_id_header.clone()))
         .layer(SetRequestIdLayer::new(
             request_id_header.clone(),

@@ -1,22 +1,37 @@
-use crate::domain::{
-    diagnosis::{DiagnosisEvidence, DiagnosisRun},
-    incident::{ArchiveResult, IncidentRecord, IncidentSummary, SearchResult},
+use crate::{
+    config::AppConfig,
+    domain::{
+        diagnosis::{DiagnosisEvidence, DiagnosisRun},
+        incident::{ArchiveResult, IncidentRecord, IncidentSummary, SearchResult},
+    },
+    error::AppError,
+    services::{
+        milvus_service::MilvusDocument,
+        vector_embedding_service::{generate_sparse_vector, VectorEmbeddingService},
+        vector_search_service::VectorSearchService,
+    },
 };
+use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
+use uuid::Uuid;
 
 pub struct IncidentService {
     incidents: Mutex<HashMap<String, IncidentRecord>>,
+    vector_search_service: VectorSearchService,
+    embedding_service: VectorEmbeddingService,
 }
 
 impl IncidentService {
-    pub fn new() -> Self {
+    pub fn new(config: &AppConfig) -> Self {
         let incident = seed_incident();
         Self {
             incidents: Mutex::new(HashMap::from([(incident.id.clone(), incident)])),
+            vector_search_service: VectorSearchService::new(config),
+            embedding_service: VectorEmbeddingService::new(config),
         }
     }
 
@@ -50,7 +65,7 @@ impl IncidentService {
         let incident = incidents.get_mut(incident_id)?;
         let now = now_millis();
         let run = DiagnosisRun {
-            run_id: format!("run-{}", uuid::Uuid::new_v4()),
+            run_id: format!("run-{}", Uuid::new_v4()),
             incident_id: incident_id.to_string(),
             status: "QUEUED".to_string(),
             created_at: now,
@@ -63,33 +78,110 @@ impl IncidentService {
         Some(run)
     }
 
-    pub fn archive_case(&self, incident_id: &str) -> ArchiveResult {
-        ArchiveResult {
-            success: self.get(incident_id).is_some(),
+    pub async fn archive_case(&self, incident_id: &str) -> Result<ArchiveResult, AppError> {
+        let incident = self
+            .get(incident_id)
+            .ok_or_else(|| AppError::bad_request(format!("Incident 不存在: {incident_id}")))?;
+        let run = latest_completed_run(&incident)
+            .ok_or_else(|| AppError::bad_request("Incident 尚无已完成诊断，不能写入历史案例"))?;
+
+        let document = build_case_document(&incident, &run);
+        let expr = format!(
+            "metadata[\"doc_type\"] == \"incident_case\" && metadata[\"incident_id\"] == \"{}\"",
+            escape_expr(&incident.id)
+        );
+        self.vector_search_service
+            .milvus_service()
+            .delete_by_expr(&expr)
+            .await?;
+        self.vector_search_service
+            .milvus_service()
+            .load_collection()
+            .await?;
+        self.vector_search_service
+            .milvus_service()
+            .insert(&[MilvusDocument {
+                id: document.id.clone(),
+                content: document.content.clone(),
+                vector: self
+                    .embedding_service
+                    .generate_embedding(&document.content)
+                    .await?,
+                sparse_vector: generate_sparse_vector(&document.content),
+                metadata: document.metadata,
+            }])
+            .await?;
+
+        Ok(ArchiveResult {
+            success: true,
             incident_id: incident_id.to_string(),
-            message: if self.get(incident_id).is_some() {
-                "历史案例已写入知识库".to_string()
-            } else {
-                "事故不存在".to_string()
-            },
-        }
+            document_id: Some(document.id),
+            message: "历史案例已写入知识库".to_string(),
+        })
     }
 
-    pub fn similar_cases(&self, incident_id: &str, top_k: usize) -> Vec<SearchResult> {
-        if self.get(incident_id).is_none() {
-            return Vec::new();
-        }
+    pub async fn similar_cases(
+        &self,
+        incident_id: &str,
+        top_k: usize,
+    ) -> Result<Vec<SearchResult>, AppError> {
+        let incident = self
+            .get(incident_id)
+            .ok_or_else(|| AppError::bad_request(format!("Incident 不存在: {incident_id}")))?;
+        let query = build_incident_case_query(&incident);
+        self.vector_search_service
+            .search_incident_cases(&query, top_k.max(1))
+            .await
+    }
+}
 
-        vec![SearchResult {
-            id: "case-1".to_string(),
-            content: "历史案例: payment-service 高 CPU 后伴随错误率上升，根因曾为线程池耗尽。"
-                .to_string(),
-            score: 0.82,
-            metadata: r#"{"doc_type":"incident_case","source":"seed"}"#.to_string(),
-        }]
-        .into_iter()
-        .take(top_k)
-        .collect()
+struct CaseDocument {
+    id: String,
+    content: String,
+    metadata: Value,
+}
+
+fn build_case_document(incident: &IncidentRecord, run: &DiagnosisRun) -> CaseDocument {
+    let root_cause = extract_section(&run.report, "根因结论")
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| compact(&run.report, 240));
+    let action = extract_section(&run.report, "处理建议")
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "未提取到结构化处理动作".to_string());
+
+    let content = format!(
+        "# 历史故障案例\nIncident ID: {}\n标题: {}\n级别: {}\n告警名: {}\n服务: {}\n实例: {}\n\n## 根因\n{}\n\n## 处理动作\n{}\n\n## 原始诊断报告\n{}\n",
+        incident.id,
+        value(&incident.title),
+        value(&incident.severity),
+        value(&incident.title),
+        "",
+        "",
+        root_cause,
+        action,
+        compact(&run.report, 2000)
+    );
+    let id = Uuid::new_v5(
+        &Uuid::NAMESPACE_OID,
+        format!("incident_case:{}", incident.id).as_bytes(),
+    )
+    .to_string();
+
+    CaseDocument {
+        id,
+        content,
+        metadata: json!({
+            "_source": format!("incident_case:{}", incident.id),
+            "doc_type": "incident_case",
+            "incident_id": incident.id,
+            "run_id": run.run_id,
+            "alertname": value(&incident.title),
+            "service": "",
+            "instance": "",
+            "severity": value(&incident.severity),
+            "root_cause": root_cause,
+            "archived_at": now_millis(),
+        }),
     }
 }
 
@@ -148,11 +240,56 @@ fn summary(record: &IncidentRecord) -> IncidentSummary {
     }
 }
 
+fn latest_completed_run(incident: &IncidentRecord) -> Option<DiagnosisRun> {
+    incident
+        .diagnosis_runs
+        .iter()
+        .rev()
+        .find(|run| run.status == "COMPLETED" && !run.report.trim().is_empty())
+        .cloned()
+}
+
+fn build_incident_case_query(incident: &IncidentRecord) -> String {
+    [incident.title.as_str(), incident.severity.as_str()]
+        .into_iter()
+        .filter(|part| !part.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn build_alert_context(incident: &IncidentRecord) -> String {
     format!(
         "{} severity={} alertCount={}",
         incident.title, incident.severity, incident.alert_count
     )
+}
+
+fn extract_section(report: &str, heading: &str) -> Option<String> {
+    let marker = format!("## {heading}");
+    let start = report.find(&marker)? + marker.len();
+    let rest = &report[start..];
+    let end = rest.find("\n## ").unwrap_or(rest.len());
+    Some(rest[..end].trim().to_string())
+}
+
+fn compact(value: &str, max_len: usize) -> String {
+    let mut result = value.chars().take(max_len).collect::<String>();
+    if value.chars().count() > max_len {
+        result.push_str("...");
+    }
+    result
+}
+
+fn value(value: &str) -> &str {
+    if value.trim().is_empty() {
+        "N/A"
+    } else {
+        value
+    }
+}
+
+fn escape_expr(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn now_millis() -> i64 {

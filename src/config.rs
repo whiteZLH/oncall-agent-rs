@@ -18,6 +18,18 @@ pub struct AppConfig {
     pub dashscope_embedding_model: String,
     pub dashscope_rerank_model: String,
     pub dashscope_rerank_url: String,
+    pub milvus_host: String,
+    pub milvus_port: u16,
+    pub milvus_username: String,
+    pub milvus_password: String,
+    pub milvus_database: String,
+    pub milvus_timeout_ms: u64,
+    pub rag_candidate_k: usize,
+    pub rag_search_ef: usize,
+    pub upload_path: String,
+    pub upload_allowed_extensions: Vec<String>,
+    pub document_chunk_max_size: usize,
+    pub document_chunk_overlap: usize,
     pub private_memory_recall_enabled: bool,
     pub private_memory_recall_top_k: usize,
     pub private_memory_store_path: String,
@@ -50,6 +62,25 @@ impl AppConfig {
             "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
                 .to_string()
         });
+        let milvus_host = read_string("MILVUS_HOST")?.unwrap_or_else(|| "localhost".to_string());
+        let milvus_port = read_port("MILVUS_PORT")?.unwrap_or(19530);
+        let milvus_username = read_string("MILVUS_USERNAME")?.unwrap_or_default();
+        let milvus_password = read_string("MILVUS_PASSWORD")?.unwrap_or_default();
+        let milvus_database =
+            read_string("MILVUS_DATABASE")?.unwrap_or_else(|| "default".to_string());
+        let milvus_timeout_ms = read_u64("MILVUS_TIMEOUT_MS")?.unwrap_or(10_000);
+        let rag_candidate_k = read_usize("RAG_CANDIDATE_K")?.unwrap_or(10);
+        let rag_search_ef = read_usize("RAG_SEARCH_EF")?.unwrap_or(64);
+        let upload_path =
+            read_string("FILE_UPLOAD_PATH")?.unwrap_or_else(|| "./uploads".to_string());
+        let upload_allowed_extensions = read_string("FILE_UPLOAD_ALLOWED_EXTENSIONS")?
+            .unwrap_or_else(|| "txt,md".to_string())
+            .split(',')
+            .map(|item| item.trim().to_ascii_lowercase())
+            .filter(|item| !item.is_empty())
+            .collect::<Vec<_>>();
+        let document_chunk_max_size = read_usize("DOCUMENT_CHUNK_MAX_SIZE")?.unwrap_or(800);
+        let document_chunk_overlap = read_usize("DOCUMENT_CHUNK_OVERLAP")?.unwrap_or(100);
         let private_memory_recall_enabled =
             read_bool("APP_PRIVATE_MEMORY_RECALL_ENABLED")?.unwrap_or(true);
         let private_memory_recall_top_k =
@@ -77,6 +108,31 @@ impl AppConfig {
                 "APP_CHAT_AGENT_MAX_TURNS 必须大于 0".to_string(),
             ));
         }
+        if milvus_timeout_ms == 0 {
+            return Err(ConfigError::InvalidValue(
+                "MILVUS_TIMEOUT_MS 必须大于 0".to_string(),
+            ));
+        }
+        if rag_candidate_k == 0 {
+            return Err(ConfigError::InvalidValue(
+                "RAG_CANDIDATE_K 必须大于 0".to_string(),
+            ));
+        }
+        if rag_search_ef == 0 {
+            return Err(ConfigError::InvalidValue(
+                "RAG_SEARCH_EF 必须大于 0".to_string(),
+            ));
+        }
+        if upload_allowed_extensions.is_empty() {
+            return Err(ConfigError::InvalidValue(
+                "FILE_UPLOAD_ALLOWED_EXTENSIONS 不能为空".to_string(),
+            ));
+        }
+        if document_chunk_max_size == 0 {
+            return Err(ConfigError::InvalidValue(
+                "DOCUMENT_CHUNK_MAX_SIZE 必须大于 0".to_string(),
+            ));
+        }
 
         Ok(Self {
             host,
@@ -95,6 +151,18 @@ impl AppConfig {
             dashscope_embedding_model,
             dashscope_rerank_model,
             dashscope_rerank_url,
+            milvus_host,
+            milvus_port,
+            milvus_username,
+            milvus_password,
+            milvus_database,
+            milvus_timeout_ms,
+            rag_candidate_k,
+            rag_search_ef,
+            upload_path,
+            upload_allowed_extensions,
+            document_chunk_max_size,
+            document_chunk_overlap,
             private_memory_recall_enabled,
             private_memory_recall_top_k,
             private_memory_store_path,

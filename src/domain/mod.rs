@@ -3,3 +3,4 @@ pub mod diagnosis;
 pub mod document;
 pub mod incident;
 pub mod memory;
+pub mod rag;

@@ -82,22 +82,32 @@ async fn diagnose_incident(
 async fn archive_case(
     State(state): State<Arc<AppState>>,
     Path(incident_id): Path<String>,
-) -> Json<ApiResponse<ArchiveResult>> {
-    Json(ApiResponse::success(
-        state.incident_service.archive_case(&incident_id),
-    ))
+) -> (StatusCode, Json<ApiResponse<ArchiveResult>>) {
+    match state.incident_service.archive_case(&incident_id).await {
+        Ok(result) => (StatusCode::OK, Json(ApiResponse::success(result))),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(500, error.to_string())),
+        ),
+    }
 }
 
 async fn similar_cases(
     State(state): State<Arc<AppState>>,
     Path(incident_id): Path<String>,
     Query(params): Query<SimilarCasesQuery>,
-) -> Json<ApiResponse<Vec<SearchResult>>> {
-    Json(ApiResponse::success(
-        state
-            .incident_service
-            .similar_cases(&incident_id, params.top_k.unwrap_or(3)),
-    ))
+) -> (StatusCode, Json<ApiResponse<Vec<SearchResult>>>) {
+    match state
+        .incident_service
+        .similar_cases(&incident_id, params.top_k.unwrap_or(3))
+        .await
+    {
+        Ok(results) => (StatusCode::OK, Json(ApiResponse::success(results))),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(500, error.to_string())),
+        ),
+    }
 }
 
 #[derive(Deserialize)]

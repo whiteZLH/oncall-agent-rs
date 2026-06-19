@@ -2,7 +2,10 @@ use crate::{
     config::AppConfig,
     domain::chat::ChatMessage,
     error::AppError,
-    services::vector_search_service::{StoredMemory, StoredMemoryMetadata, VectorSearchService},
+    services::{
+        milvus_service::MilvusDocument, vector_embedding_service::generate_sparse_vector,
+        vector_search_service::VectorSearchService,
+    },
 };
 use reqwest::Client;
 use serde_json::{json, Value};
@@ -64,25 +67,31 @@ impl MemoryExtractionService {
             }
 
             let content = format!("[用户私人记忆] {fact}");
-            let embedding = self
+            let vector = self
                 .vector_search_service
+                .embedding_service()
                 .generate_embedding(&content)
-                .await
-                .ok();
-            self.vector_search_service.append_memory(
-                session_id,
-                StoredMemory {
+                .await?;
+            self.vector_search_service
+                .milvus_service()
+                .load_collection()
+                .await?;
+            let sparse_vector = generate_sparse_vector(&content);
+            self.vector_search_service
+                .milvus_service()
+                .insert(&[MilvusDocument {
                     id: Uuid::new_v4().to_string(),
                     content,
-                    embedding,
-                    metadata: StoredMemoryMetadata {
-                        source: "chat_memory".to_string(),
-                        doc_type: DOC_TYPE_CHAT_MEMORY.to_string(),
-                        session_id: session_id.to_string(),
-                        timestamp: now_millis(),
-                    },
-                },
-            )?;
+                    vector,
+                    sparse_vector,
+                    metadata: json!({
+                        "_source": "chat_memory",
+                        "doc_type": DOC_TYPE_CHAT_MEMORY,
+                        "session_id": session_id,
+                        "timestamp": now_millis(),
+                    }),
+                }])
+                .await?;
         }
 
         Ok(())

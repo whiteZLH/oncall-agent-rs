@@ -1,8 +1,9 @@
 use crate::config::AppConfig;
 use crate::services::{
     chat_service::ChatService, incident_service::IncidentService,
+    index_task_status_service::IndexTaskStatusService,
     memory_extraction_service::MemoryExtractionService, session_manager::SessionManager,
-    vector_search_service::VectorSearchService,
+    vector_index_service::VectorIndexService, vector_search_service::VectorSearchService,
 };
 
 pub struct AppState {
@@ -12,6 +13,8 @@ pub struct AppState {
     pub memory_extraction_service: MemoryExtractionService,
     pub session_manager: SessionManager,
     pub incident_service: IncidentService,
+    pub index_task_status_service: IndexTaskStatusService,
+    pub vector_index_service: VectorIndexService,
 }
 
 impl AppState {
@@ -22,6 +25,8 @@ impl AppState {
         memory_extraction_service: MemoryExtractionService,
         session_manager: SessionManager,
         incident_service: IncidentService,
+        index_task_status_service: IndexTaskStatusService,
+        vector_index_service: VectorIndexService,
     ) -> Self {
         Self {
             config,
@@ -30,6 +35,8 @@ impl AppState {
             memory_extraction_service,
             session_manager,
             incident_service,
+            index_task_status_service,
+            vector_index_service,
         }
     }
 }
