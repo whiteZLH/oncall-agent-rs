@@ -13,7 +13,12 @@ Override configuration if needed:
 ```bash
 APP_HOST=0.0.0.0 APP_PORT=3000 cargo run
 APP_ALLOWED_ORIGIN=http://localhost:5173 APP_REQUEST_TIMEOUT_SECS=15 cargo run
+APP_STATIC_DIR=./static cargo run
 ```
+
+By default, `APP_STATIC_DIR` points at the bundled frontend in `./static`.
+Open `http://127.0.0.1:3000` after `cargo run` to use that frontend against
+the Rust API on the same origin.
 
 ## Endpoints
 

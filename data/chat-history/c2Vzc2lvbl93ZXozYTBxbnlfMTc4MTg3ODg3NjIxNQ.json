@@ -1,0 +1,23 @@
+{
+  "sessionId": "session_wez3a0qny_1781878876215",
+  "createTime": 1781878906790,
+  "updateTime": 1781879638496,
+  "messageHistory": [
+    {
+      "role": "user",
+      "content": "你好"
+    },
+    {
+      "role": "assistant",
+      "content": "oncall-agent-rs received: 你好"
+    },
+    {
+      "role": "user",
+      "content": "123"
+    },
+    {
+      "role": "assistant",
+      "content": "oncall-agent-rs received: 123"
+    }
+  ]
+}

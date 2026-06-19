@@ -1,6 +1,9 @@
 use crate::{
     config::AppConfig,
-    http::routes::{chat, health, incidents, knowledge, metrics, upload},
+    http::{
+        dto::ApiResponse,
+        routes::{chat, health, incidents, knowledge, metrics, upload},
+    },
     services::{
         chat_service::ChatService, document_chunk_service::DocumentChunkService,
         incident_service::IncidentService, index_task_status_service::IndexTaskStatusService,
@@ -15,12 +18,14 @@ use axum::{
     http::{header::HeaderValue, HeaderName, StatusCode},
     middleware::{self, Next},
     response::Response,
-    Router,
+    routing::any,
+    Json, Router,
 };
 use std::sync::Arc;
 use tower_http::{
     cors::{Any, CorsLayer},
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
+    services::{ServeDir, ServeFile},
     timeout::TimeoutLayer,
     trace::TraceLayer,
 };
@@ -53,6 +58,7 @@ pub fn build_router(config: AppConfig) -> Router {
             .unwrap_or_else(|error| panic!("APP_ALLOWED_ORIGIN 配置不合法: {}", error));
         CorsLayer::new().allow_origin(origin)
     };
+    let static_index = std::path::Path::new(&config.static_dir).join("index.html");
 
     // 子路由先声明它们需要 Arc<AppState>，这里统一注入真正的共享状态。
     Router::<Arc<AppState>>::new()
@@ -62,6 +68,8 @@ pub fn build_router(config: AppConfig) -> Router {
         .merge(incidents::router())
         .merge(knowledge::router())
         .merge(upload::router())
+        .route("/api/{*path}", any(api_not_found))
+        .fallback_service(ServeDir::new(config.static_dir).fallback(ServeFile::new(static_index)))
         .layer(PropagateRequestIdLayer::new(request_id_header.clone()))
         .layer(SetRequestIdLayer::new(
             request_id_header.clone(),
@@ -75,6 +83,13 @@ pub fn build_router(config: AppConfig) -> Router {
         ))
         .layer(cors)
         .with_state(state)
+}
+
+async fn api_not_found() -> (StatusCode, Json<ApiResponse<String>>) {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ApiResponse::error(404, "接口不存在")),
+    )
 }
 
 async fn attach_request_id(mut request: Request, next: Next) -> Response {

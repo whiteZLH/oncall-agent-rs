@@ -1,0 +1,15 @@
+{
+  "sessionId": "session_quy7sl26d_1781878844427",
+  "createTime": 1781878864886,
+  "updateTime": 1781878864888,
+  "messageHistory": [
+    {
+      "role": "user",
+      "content": "你好"
+    },
+    {
+      "role": "assistant",
+      "content": "oncall-agent-rs received: 你好"
+    }
+  ]
+}

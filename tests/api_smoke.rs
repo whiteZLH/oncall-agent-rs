@@ -21,6 +21,7 @@ fn test_config() -> AppConfig {
         allowed_origin: "*".to_string(),
         request_timeout: std::time::Duration::from_secs(30),
         log_filter: "info".to_string(),
+        static_dir: "./static".to_string(),
         redis_url: None,
         chat_history_path: unique_target_path("chat-history").display().to_string(),
         session_ttl_secs: 3600,
@@ -103,6 +104,32 @@ async fn health_endpoint_returns_ok() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert!(response.headers().contains_key("x-request-id"));
+}
+
+#[tokio::test]
+async fn root_serves_bundled_frontend() {
+    let app = app::build_router(test_config());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .body(Body::empty())
+                .expect("构造请求失败"),
+        )
+        .await
+        .expect("执行请求失败");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/html")));
+
+    let body = body_text(response).await;
+    assert!(body.contains("<title>智能OnCall助手</title>"));
+    assert!(body.contains(r#"<script src="app.js"></script>"#));
 }
 
 #[tokio::test]

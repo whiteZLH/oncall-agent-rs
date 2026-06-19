@@ -519,6 +519,7 @@ mod tests {
             allowed_origin: "*".to_string(),
             request_timeout: Duration::from_secs(30),
             log_filter: "info".to_string(),
+            static_dir: "./static".to_string(),
             redis_url: None,
             chat_history_path: unique_path(name).display().to_string(),
             session_ttl_secs: 3600,

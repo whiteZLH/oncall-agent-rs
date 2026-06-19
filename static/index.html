@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="智能OnCall助手 - AI驱动的智能运维监控与告警分析平台">
+    <meta name="theme-color" content="#1E3A5F" id="themeColorMeta">
+    <meta name="color-scheme" content="light dark">
+    <title>智能OnCall助手</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Markdown 渲染库 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js"></script>
+    <!-- 代码高亮库 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css" id="hljsTheme">
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/es/highlight.min.js"></script>
+</head>
+<body>
+    <!-- 移动端侧边栏遮罩 -->
+    <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
+
+    <div class="app-layout">
+        <!-- 左侧边栏 -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h2 class="sidebar-title">智能OnCall助手</h2>
+                <div class="sidebar-header-actions">
+                    <button class="theme-toggle-btn" id="themeToggleBtn" title="切换暗黑模式" aria-label="切换暗黑模式">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" id="themeIconSun">
+                            <path d="M12 17C14.7614 17 17 14.7614 17 12C17 9.23858 14.7614 7 12 7C9.23858 7 7 9.23858 7 12C7 14.7614 9.23858 17 12 17Z" stroke="currentColor" stroke-width="2"/>
+                            <path d="M12 1V3M12 21V23M4.22 4.22L5.64 5.64M18.36 18.36L19.78 19.78M1 12H3M21 12H23M4.22 19.78L5.64 18.36M18.36 5.64L19.78 4.22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" id="themeIconMoon" style="display:none">
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="sidebar-content">
+                <button class="new-chat-btn" id="newChatBtn">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span>新建对话</span>
+                </button>
+
+                <div class="chat-history-section">
+                    <div class="history-header">
+                        <span>近期对话</span>
+                    </div>
+                    <div class="chat-history-list" id="chatHistoryList">
+                        <!-- 历史对话列表将在这里动态生成 -->
+                    </div>
+                </div>
+
+                <!-- 知识库区域 -->
+                <div class="knowledge-section">
+                    <div class="history-header">
+                        <span>知识库</span>
+                    </div>
+                    <button class="sidebar-btn" id="knowledgePanelBtn">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M4 19.5V5C4 3.89543 4.89543 3 6 3H19V21H6C4.89543 21 4 20.1046 4 19Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M8 7H15M8 11H16M8 15H13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        <span>知识库状态</span>
+                    </button>
+                </div>
+
+                <!-- 告警管理区域 -->
+                <div class="alert-section">
+                    <div class="history-header">
+                        <span>告警管理</span>
+                    </div>
+                    <button class="sidebar-btn" id="queryAlertsBtn">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <span>主动查询告警</span>
+                    </button>
+                    <button class="sidebar-btn" id="alertHistoryBtn">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 8V12L15 15M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        <span>事故历史</span>
+                    </button>
+                    <button class="sidebar-btn" id="simulateAlertBtn">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 9V13M12 17H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        <span>模拟告警</span>
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 主内容区域 -->
+        <main class="main-content">
+            <div class="chat-container" id="chatContainer">
+                <div class="welcome-greeting" id="welcomeGreeting">
+                    <p>你好！我是智能Oncall小助手</p>
+                    <div class="greeting-sub">AI 驱动的智能运维监控与告警分析平台</div>
+                </div>
+                <div class="chat-messages" id="chatMessages">
+                </div>
+
+                <div class="chat-input-container">
+                    <div class="input-group-wrapper">
+                        <div class="input-wrapper">
+                            <textarea id="messageInput" placeholder="问问智能OnCall助手" maxlength="1000" class="message-input" rows="1"></textarea>
+                            <div class="input-bottom-bar">
+                                <div class="tools-btn-wrapper">
+                                    <button class="tools-btn" id="toolsBtn" title="更多选项">
+                                        <svg class="tools-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
+                                            <circle cx="19" cy="12" r="1.5" fill="currentColor"/>
+                                            <circle cx="5" cy="12" r="1.5" fill="currentColor"/>
+                                        </svg>
+                                    </button>
+                                    <div class="tools-menu" id="toolsMenu">
+                                        <div class="tools-menu-item" id="uploadFileItem">
+                                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                            <span>上传文件</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="right-actions">
+                                    <div class="mode-selector-wrapper">
+                                        <button class="mode-selector-btn" id="modeSelectorBtn" title="切换对话模式">
+                                            <span id="currentModeText">快速</span>
+                                            <svg class="dropdown-arrow" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                        </button>
+                                        <div class="mode-dropdown" id="modeDropdown">
+                                            <div class="dropdown-header">选择对话方式</div>
+                                            <div class="dropdown-item active" data-mode="quick">
+                                                <div class="dropdown-item-main">
+                                                    <span>快速</span>
+                                                    <span class="badge-new">新</span>
+                                                </div>
+                                                <div class="dropdown-item-sub">快速对话</div>
+                                            </div>
+                                            <div class="dropdown-item" data-mode="stream">
+                                                <div class="dropdown-item-main">
+                                                    <span>流式</span>
+                                                </div>
+                                                <div class="dropdown-item-sub">流式对话</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button class="send-btn-circle" id="sendButton" title="发送">
+                                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <input type="file" id="fileInput" accept=".txt,.md,.markdown" hidden>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 加载遮罩层 -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <div class="loading-text" id="loadingText">智能运维分析中，请稍候...</div>
+            <div class="loading-subtext" id="loadingSubtext">后端正在处理，请耐心等待</div>
+        </div>
+    </div>
+
+    <!-- 知识库面板 -->
+    <div id="knowledgePanel" class="alert-panel knowledge-panel" style="display:none;">
+        <div class="alert-panel-header">
+            <h3>知识库</h3>
+            <button class="alert-panel-close" id="knowledgePanelClose" aria-label="关闭">&times;</button>
+        </div>
+        <div class="alert-panel-content" id="knowledgePanelContent">
+            <div class="alert-panel-loading">加载中...</div>
+        </div>
+    </div>
+
+    <!-- 事故历史面板 -->
+    <div id="alertHistoryPanel" class="alert-panel" style="display:none;">
+        <div class="alert-panel-header">
+            <h3>事故历史</h3>
+            <button class="alert-panel-close" id="alertHistoryPanelClose" aria-label="关闭">&times;</button>
+        </div>
+        <div class="alert-panel-content" id="alertHistoryContent">
+            <div class="alert-panel-loading">加载中...</div>
+        </div>
+    </div>
+
+    <!-- 事故详情面板 -->
+    <div id="alertDetailPanel" class="alert-panel alert-detail-panel" style="display:none;">
+        <div class="alert-panel-header">
+            <h3>事故详情</h3>
+            <button class="alert-panel-close" id="alertDetailPanelClose" aria-label="关闭">&times;</button>
+        </div>
+        <div class="alert-panel-content" id="alertDetailContent">
+            <div class="alert-panel-loading">加载中...</div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

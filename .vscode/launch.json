@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug Rust binary",
+            "preLaunchTask": "cargo build",
+            "program": "${workspaceFolder}/target/debug/oncall-agent-rs.exe",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "sourceLanguages": [],
+            "expressions": "simple"
+        }
+    ]
+}

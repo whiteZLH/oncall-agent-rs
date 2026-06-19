@@ -7,6 +7,7 @@ pub struct AppConfig {
     pub allowed_origin: String,
     pub request_timeout: Duration,
     pub log_filter: String,
+    pub static_dir: String,
     pub redis_url: Option<String>,
     pub chat_history_path: String,
     pub session_ttl_secs: u64,
@@ -42,6 +43,7 @@ impl AppConfig {
         let allowed_origin = read_string("APP_ALLOWED_ORIGIN")?.unwrap_or_else(|| "*".to_string());
         let request_timeout_secs = read_u64("APP_REQUEST_TIMEOUT_SECS")?.unwrap_or(30);
         let log_filter = read_string("APP_LOG_FILTER")?.unwrap_or_else(|| "info".to_string());
+        let static_dir = read_string("APP_STATIC_DIR")?.unwrap_or_else(|| "./static".to_string());
         let redis_url = read_string("APP_REDIS_URL")?;
         let chat_history_path = read_string("APP_CHAT_HISTORY_PATH")?
             .unwrap_or_else(|| "./data/chat-history".to_string());
@@ -140,6 +142,7 @@ impl AppConfig {
             allowed_origin,
             request_timeout: Duration::from_secs(request_timeout_secs),
             log_filter,
+            static_dir,
             redis_url,
             chat_history_path,
             session_ttl_secs,
