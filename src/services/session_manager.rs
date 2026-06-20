@@ -549,6 +549,13 @@ mod tests {
             private_memory_recall_enabled: true,
             private_memory_recall_top_k: 3,
             private_memory_store_path: "./target/test-private-memories".to_string(),
+            prometheus_base_url: "http://localhost:9090".to_string(),
+            prometheus_timeout_secs: 10,
+            prometheus_mock_enabled: true,
+            cls_mock_enabled: true,
+            ai_ops_chat_model: "qwen-plus".to_string(),
+            ai_ops_agent_max_turns: 12,
+            ai_ops_max_rounds: 8,
         }
     }
 

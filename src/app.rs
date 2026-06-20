@@ -5,8 +5,9 @@ use crate::{
         routes::{chat, health, incidents, knowledge, metrics, upload},
     },
     services::{
-        chat_service::ChatService, document_chunk_service::DocumentChunkService,
-        incident_service::IncidentService, index_task_status_service::IndexTaskStatusService,
+        ai_ops_service::AiOpsService, alert_service::AlertService, chat_service::ChatService,
+        document_chunk_service::DocumentChunkService, incident_service::IncidentService,
+        index_task_status_service::IndexTaskStatusService,
         memory_extraction_service::MemoryExtractionService, milvus_service::MilvusService,
         session_manager::SessionManager, vector_embedding_service::VectorEmbeddingService,
         vector_index_service::VectorIndexService, vector_search_service::VectorSearchService,
@@ -35,6 +36,8 @@ pub const REQUEST_ID_HEADER: &str = "x-request-id";
 pub fn build_router(config: AppConfig) -> Router {
     let vector_search_service = VectorSearchService::new(&config);
     let chat_service = ChatService::new(&config).with_vector_search(vector_search_service.clone());
+    let ai_ops_service =
+        AiOpsService::new(&config).with_vector_search(vector_search_service.clone());
     let vector_index_service = VectorIndexService::new(
         VectorEmbeddingService::new(&config),
         DocumentChunkService::new(&config),
@@ -43,6 +46,8 @@ pub fn build_router(config: AppConfig) -> Router {
     let state = Arc::new(AppState::new(
         config.clone(),
         chat_service,
+        ai_ops_service,
+        AlertService::new(),
         vector_search_service,
         MemoryExtractionService::new(&config),
         SessionManager::new(&config),

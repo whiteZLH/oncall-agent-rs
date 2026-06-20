@@ -35,6 +35,13 @@ pub struct AppConfig {
     pub private_memory_recall_enabled: bool,
     pub private_memory_recall_top_k: usize,
     pub private_memory_store_path: String,
+    pub prometheus_base_url: String,
+    pub prometheus_timeout_secs: u64,
+    pub prometheus_mock_enabled: bool,
+    pub cls_mock_enabled: bool,
+    pub ai_ops_chat_model: String,
+    pub ai_ops_agent_max_turns: usize,
+    pub ai_ops_max_rounds: usize,
 }
 
 impl AppConfig {
@@ -92,6 +99,15 @@ impl AppConfig {
             read_usize("APP_PRIVATE_MEMORY_RECALL_TOP_K")?.unwrap_or(3);
         let private_memory_store_path = read_string("APP_PRIVATE_MEMORY_STORE_PATH")?
             .unwrap_or_else(|| "./data/private-memories".to_string());
+        let prometheus_base_url = read_string("PROMETHEUS_BASE_URL")?
+            .unwrap_or_else(|| "http://localhost:9090".to_string());
+        let prometheus_timeout_secs = read_u64("PROMETHEUS_TIMEOUT")?.unwrap_or(10);
+        let prometheus_mock_enabled = read_bool("PROMETHEUS_MOCK_ENABLED")?.unwrap_or(false);
+        let cls_mock_enabled = read_bool("CLS_MOCK_ENABLED")?.unwrap_or(false);
+        let ai_ops_chat_model =
+            read_string("DASHSCOPE_AI_OPS_CHAT_MODEL")?.unwrap_or_else(|| dashscope_chat_model.clone());
+        let ai_ops_agent_max_turns = read_usize("APP_AI_OPS_AGENT_MAX_TURNS")?.unwrap_or(12);
+        let ai_ops_max_rounds = read_usize("APP_AI_OPS_MAX_ROUNDS")?.unwrap_or(8);
 
         if request_timeout_secs == 0 {
             return Err(ConfigError::InvalidValue(
@@ -111,6 +127,16 @@ impl AppConfig {
         if chat_agent_max_turns == 0 {
             return Err(ConfigError::InvalidValue(
                 "APP_CHAT_AGENT_MAX_TURNS 必须大于 0".to_string(),
+            ));
+        }
+        if ai_ops_agent_max_turns == 0 {
+            return Err(ConfigError::InvalidValue(
+                "APP_AI_OPS_AGENT_MAX_TURNS 必须大于 0".to_string(),
+            ));
+        }
+        if ai_ops_max_rounds == 0 {
+            return Err(ConfigError::InvalidValue(
+                "APP_AI_OPS_MAX_ROUNDS 必须大于 0".to_string(),
             ));
         }
         if milvus_timeout_ms == 0 {
@@ -173,6 +199,13 @@ impl AppConfig {
             private_memory_recall_enabled,
             private_memory_recall_top_k,
             private_memory_store_path,
+            prometheus_base_url,
+            prometheus_timeout_secs,
+            prometheus_mock_enabled,
+            cls_mock_enabled,
+            ai_ops_chat_model,
+            ai_ops_agent_max_turns,
+            ai_ops_max_rounds,
         })
     }
 }

@@ -56,21 +56,21 @@ pub enum ChatStreamEvent {
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
-struct ChatToolError(String);
+pub struct ChatToolError(pub String);
 
 #[derive(Clone, Serialize, Deserialize)]
-struct GetCurrentDateTimeTool;
+pub(crate) struct GetCurrentDateTimeTool;
 
 #[derive(Clone, Serialize, Deserialize)]
-struct GetCurrentDateTimeArgs {}
+pub(crate) struct GetCurrentDateTimeArgs {}
 
 #[derive(Clone)]
-struct QueryInternalDocsTool {
-    vector_search_service: Option<VectorSearchService>,
+pub(crate) struct QueryInternalDocsTool {
+    pub(crate) vector_search_service: Option<VectorSearchService>,
 }
 
 #[derive(Clone, Deserialize)]
-struct QueryInternalDocsArgs {
+pub(crate) struct QueryInternalDocsArgs {
     query: String,
 }
 
@@ -505,6 +505,13 @@ mod tests {
             private_memory_recall_enabled: true,
             private_memory_recall_top_k: 3,
             private_memory_store_path: "./target/test-private-memories".to_string(),
+            prometheus_base_url: "http://localhost:9090".to_string(),
+            prometheus_timeout_secs: 10,
+            prometheus_mock_enabled: true,
+            cls_mock_enabled: true,
+            ai_ops_chat_model: "GPT-5.5".to_string(),
+            ai_ops_agent_max_turns: 12,
+            ai_ops_max_rounds: 8,
         }
     }
 

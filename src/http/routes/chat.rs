@@ -1,6 +1,6 @@
 use crate::{
     domain::chat::{ChatSessionRecord, ChatSessionSummary, SessionInfoResponse},
-    http::dto::{ApiResponse, ChatRequest, ChatResponse, ClearRequest, SseMessage},
+    http::dto::{AiOpsRequest, ApiResponse, ChatRequest, ChatResponse, ClearRequest, SseMessage},
     services::{chat_service::ChatStreamEvent, session_manager::SessionInfo},
     state::AppState,
 };
@@ -22,6 +22,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/chat", post(chat))
         .route("/api/chat_stream", post(chat_stream))
+        .route("/api/ai_ops", post(ai_ops))
         .route("/api/chat/clear", post(clear_chat_history))
         .route("/api/chat/sessions", get(list_chat_sessions))
         .route(
@@ -178,6 +179,79 @@ async fn chat_stream(
         );
 
         yield sse_event(SseMessage::done());
+    };
+
+    sse_response(stream)
+}
+
+/// AI 智能运维接口（SSE 流式）：自动分析告警并生成运维报告。
+/// 对应 Java 版本 `ChatController.aiOps`（POST /api/ai_ops）。
+async fn ai_ops(
+    State(state): State<Arc<AppState>>,
+    body: Option<Json<AiOpsRequest>>,
+) -> Response {
+    let payload = body.map(|Json(payload)| payload).unwrap_or_default();
+    let alert_context = payload
+        .alert_context
+        .map(|ctx| ctx.trim().to_string())
+        .filter(|ctx| !ctx.is_empty());
+    let alert_id = payload
+        .alert_id
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty());
+
+    let stream = async_stream::stream! {
+        info!("收到 AI 智能运维请求 - 启动多 Agent 协作流程");
+
+        // 与 Java 一致：先回送任务拆解提示
+        yield sse_event(SseMessage::content("正在读取告警并拆解任务...\n"));
+
+        let report = match state
+            .ai_ops_service
+            .execute_ai_ops_analysis(alert_context.as_deref())
+            .await
+        {
+            Ok(report) => report,
+            Err(error) => {
+                warn!("AI Ops 多 Agent 协作失败: {}", error);
+                yield sse_event(SseMessage::error(format!("AI Ops 流程失败: {error}")));
+                return;
+            }
+        };
+
+        if report.trim().is_empty() {
+            warn!("未能提取到 Planner 最终报告");
+            yield sse_event(SseMessage::content(
+                "⚠️ 多 Agent 流程已完成，但未能生成最终报告。",
+            ));
+            yield sse_event(SseMessage::done());
+            return;
+        }
+
+        info!("提取到 Planner 最终报告，长度: {}", report.chars().count());
+
+        // 如有关联告警 ID，存储报告
+        if let Some(alert_id) = alert_id.as_deref() {
+            state.alert_service.store_report(alert_id, &report);
+            info!("告警分析报告已关联存储, alertId: {}", alert_id);
+        }
+
+        let separator = "=".repeat(60);
+        yield sse_event(SseMessage::content(format!("\n\n{separator}\n")));
+        yield sse_event(SseMessage::content("📋 **告警分析报告**\n\n"));
+
+        // 按 50 字符分块输出（按 Unicode 字符切分，避免破坏多字节字符）
+        let chars: Vec<char> = report.chars().collect();
+        for chunk in chars.chunks(50) {
+            let piece: String = chunk.iter().collect();
+            yield sse_event(SseMessage::content(piece));
+        }
+
+        yield sse_event(SseMessage::content(format!("\n{separator}\n\n")));
+        info!("最终报告已完整输出");
+
+        yield sse_event(SseMessage::done());
+        info!("AI Ops 多 Agent 编排完成");
     };
 
     sse_response(stream)

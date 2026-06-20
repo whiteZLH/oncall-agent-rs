@@ -1,3 +1,5 @@
+pub mod ai_ops_service;
+pub mod alert_service;
 pub mod chat_history_store;
 pub mod chat_service;
 pub mod document_chunk_service;
