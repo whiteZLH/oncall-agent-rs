@@ -226,9 +226,11 @@ impl AiOpsService {
         let agent = client
             .agent(&self.model)
             .name(name)
-            // 对齐 Java DashScopeModelConfig 的 AI Ops 参数：temperature 0.3 / maxToken 8000
+            // 对齐 Java DashScopeModelConfig 的 AI Ops 参数：temperature 0.3 / maxToken 8000 / topP 0.9
             .temperature(0.3)
             .max_tokens(8000)
+            // rig 0.36 的 AgentBuilder 无 top_p 方法，topP 经 additional_params 注入请求体
+            .additional_params(serde_json::json!({ "top_p": 0.9 }))
             .preamble(preamble)
             .tools(self.build_method_tools())
             .build();
@@ -266,9 +268,10 @@ impl AiOpsService {
         let agent = client
             .agent(&self.model)
             .name("ai_ops_supervisor")
-            // 与 planner/executor 同样对齐 Java AI Ops 模型参数
+            // 与 planner/executor 同样对齐 Java AI Ops 模型参数：temperature 0.3 / maxToken 8000 / topP 0.9
             .temperature(0.3)
             .max_tokens(8000)
+            .additional_params(serde_json::json!({ "top_p": 0.9 }))
             .preamble(&preamble)
             .build();
 
@@ -535,7 +538,14 @@ const SUPERVISOR_PROMPT: &str = r##"你是 AI Ops Supervisor，负责调度 plan
 1. 当需要拆解任务或重新制定策略时，调用 planner_agent。
 2. 当 planner_agent 输出 decision=EXECUTE 时，调用 executor_agent 执行第一步。
 3. 根据 executor_agent 的反馈，评估是否需要再次调用 planner_agent，直到 decision=FINISH。
-4. FINISH 后，确保向最终用户输出完整的《告警分析报告》。
+4. FINISH 后，确保向最终用户输出完整的《告警分析报告》，格式必须严格为：
+   告警分析报告
+---
+# 告警处理详情
+## 活跃告警清单
+## 告警根因分析N
+## 处理方案执行N
+## 结论。
 5. 若步骤涉及腾讯云日志/主题工具，请确保使用连字符区域 ID（ap-guangzhou 等），或省略 region 以采用默认值。
 6. 如果发现 Planner/Executor 在同一方向连续 3 次调用工具仍失败或没有数据，必须终止流程，直接输出"任务无法完成"的报告，明确告知失败原因，严禁凭空编造结果。
 
