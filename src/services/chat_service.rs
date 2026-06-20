@@ -74,7 +74,7 @@ impl ChatService {
     pub fn new(config: &AppConfig) -> Self {
         Self {
             api_key: config.dashscope_api_key.clone(),
-            base_url: config.dashscope_base_url.clone(),
+            base_url: config.dashscope_api_base_url.clone(),
             model: config.dashscope_chat_model.clone(),
             max_turns: config.chat_agent_max_turns,
             vector_search_service: None,
@@ -236,16 +236,23 @@ impl ChatService {
             .agent(&agent.model)
             .name(&agent.name)
             .preamble(&agent.system_prompt)
-            .default_max_turns(agent.max_turns)
-            .tools(self.build_method_tools())
+            // .default_max_turns(agent.max_turns)
+            .tools(vec![])
             .build();
+
+        // let runtime_agent = client.extractor::<String>(&agent.model).build();
+
+        // let answer = runtime_agent
+        //     .extract(&agent.system_prompt)
+        //     .await
+        //     .expect("Failed to extract data from text");
 
         let answer = runtime_agent
             .prompt(question)
-            .max_turns(agent.max_turns)
-            .with_tool_concurrency(1)
+            // .max_turns(agent.max_turns)
+            // .with_tool_concurrency(1)
             .await
-            .map_err(|error| map_prompt_error(error, agent.max_turns))?;
+            .map_err(|error: PromptError| map_prompt_error(error, agent.max_turns))?;
         Ok(answer)
     }
 
@@ -262,7 +269,7 @@ impl ChatService {
             }));
         };
 
-        let client = openai::Client::builder()
+        let client = openai::CompletionsClient::builder()
             .api_key(api_key)
             .base_url(&self.base_url)
             .build()
@@ -424,9 +431,33 @@ mod tests {
         domain::{chat::ChatMessage, memory::PrivateMemorySearchResult},
     };
     use futures_util::StreamExt;
-    use rig::tool::Tool;
+    use rig::{
+        client::{CompletionClient, ProviderClient},
+        completion::Prompt,
+        providers::openai,
+        tool::Tool,
+    };
     use serde_json::Value;
-    use std::{net::Ipv4Addr, time::Duration};
+    use std::{env, net::Ipv4Addr, sync::Once, time::Duration};
+
+    static TRACING_INIT: Once = Once::new();
+
+    fn init_test_tracing() {
+        TRACING_INIT.call_once(|| {
+            tracing_subscriber::fmt()
+                .with_env_filter(
+                    tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                        tracing_subscriber::EnvFilter::new(
+                            "rig=trace,oncall_agent_rs=trace,reqwest=trace,rustls=trace",
+                        )
+                    }),
+                )
+                .with_test_writer()
+                .compact()
+                .try_init()
+                .ok();
+        });
+    }
 
     fn test_config() -> AppConfig {
         AppConfig {
@@ -439,10 +470,12 @@ mod tests {
             redis_url: None,
             chat_history_path: "./target/test-chat-history".to_string(),
             session_ttl_secs: 3600,
-            dashscope_api_key: None,
+            dashscope_api_key: Some(
+                "REDACTED_DASHSCOPE_KEY".to_string(),
+            ),
             dashscope_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
-            dashscope_api_base_url: "https://dashscope.aliyuncs.com/api/v1".to_string(),
-            dashscope_chat_model: "qwen-plus".to_string(),
+            dashscope_api_base_url: "https://anyrouter.top/v1".to_string(),
+            dashscope_chat_model: "GPT-5.5".to_string(),
             chat_agent_max_turns: 6,
             dashscope_embedding_model: "text-embedding-v4".to_string(),
             dashscope_rerank_model: "gte-rerank".to_string(),
@@ -542,16 +575,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_chat_without_api_key_keeps_placeholder_path_after_refactor() {
+    async fn execute_chat_with_api_key_calls_chat_completions_after_refactor() {
+        init_test_tracing();
+
         let service = ChatService::new(&test_config());
-        let agent = service.create_react_agent("qwen-plus", "prompt");
+        let agent = service.create_react_agent("gpt-5.5", "prompt");
 
         let answer = service
             .execute_chat(&agent, "继续上次的话题")
             .await
-            .expect("无 API key 时也应返回占位答案");
+            .expect("有 API key 时应完成真实模型调用");
 
-        assert!(answer.contains("继续上次的话题"));
+        println!("{}", answer);
+
+        assert!(!answer.trim().is_empty());
     }
 
     #[tokio::test]
@@ -578,10 +615,10 @@ mod tests {
     #[tokio::test]
     async fn stream_chat_final_matches_streamed_content_without_api_key() {
         let service = ChatService::new(&test_config());
-        let agent = service.create_react_agent("qwen-plus", "prompt");
+        let agent = service.create_react_agent("gpt-5.5", "prompt");
 
         let mut stream = service
-            .stream_chat(&agent, "继续上次的话题")
+            .stream_chat(&agent, "你好")
             .await
             .expect("无 API key 时应返回流式占位答案");
         let mut streamed_content = String::new();
@@ -595,5 +632,30 @@ mod tests {
         }
 
         assert_eq!(final_answer.as_deref(), Some(streamed_content.as_str()));
+    }
+
+    #[tokio::test]
+    async fn execute_offical_example() -> Result<(), Box<dyn std::error::Error>> {
+        init_test_tracing();
+
+        // 覆盖已存在的环境变量，若不存在则会创建
+        env::set_var(
+            "OPENAI_API_KEY",
+            "REDACTED_OPENAI_KEY",
+        );
+        env::set_var("OPENAI_BASE_URL", "https://api.liangrekui.com/v1");
+
+        let client = openai::Client::from_env()?;
+
+        // Create agent with a single context prompt
+        let comedian_agent = client
+            .agent("gpt-5.5")
+            .preamble("You are a comedian here to entertain the user using humour and jokes.")
+            .build();
+
+        // Prompt the agent and print the response
+        let _response = comedian_agent.prompt("Entertain me!").await.expect("msg");
+
+        Ok(())
     }
 }

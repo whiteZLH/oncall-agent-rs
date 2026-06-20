@@ -4,6 +4,8 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() {
+    dotenvy::dotenv().ok();
+
     let config = AppConfig::from_env().unwrap_or_else(|error| panic!("加载配置失败: {}", error));
     init_tracing(&config);
 

@@ -4,11 +4,15 @@ Rust service scaffold for the on-call assistant, built with `axum`.
 
 ## Run
 
+Create `.env` in the project root, or copy `.env.example` and fill in the
+values you need. The app loads `.env` automatically before reading
+configuration.
+
 ```bash
 cargo run
 ```
 
-Override configuration if needed:
+Shell environment variables still override values from `.env`:
 
 ```bash
 APP_HOST=0.0.0.0 APP_PORT=3000 cargo run
