@@ -6,6 +6,7 @@ use crate::{
     },
     error::AppError,
     services::{
+        diagnosis_report_service::constrain_report,
         milvus_service::MilvusDocument,
         vector_embedding_service::{generate_sparse_vector, VectorEmbeddingService},
         vector_search_service::VectorSearchService,
@@ -14,13 +15,13 @@ use crate::{
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 use uuid::Uuid;
 
 pub struct IncidentService {
-    incidents: Mutex<HashMap<String, IncidentRecord>>,
+    incidents: Arc<Mutex<HashMap<String, IncidentRecord>>>,
     vector_search_service: VectorSearchService,
     embedding_service: VectorEmbeddingService,
 }
@@ -29,7 +30,7 @@ impl IncidentService {
     pub fn new(config: &AppConfig) -> Self {
         let incident = seed_incident();
         Self {
-            incidents: Mutex::new(HashMap::from([(incident.id.clone(), incident)])),
+            incidents: Arc::new(Mutex::new(HashMap::from([(incident.id.clone(), incident)]))),
             vector_search_service: VectorSearchService::new(config),
             embedding_service: VectorEmbeddingService::new(config),
         }
@@ -64,13 +65,21 @@ impl IncidentService {
         let mut incidents = self.incidents.lock().expect("事故存储锁已损坏");
         let incident = incidents.get_mut(incident_id)?;
         let now = now_millis();
+        let alert_context = build_alert_context(incident);
         let run = DiagnosisRun {
-            run_id: format!("run-{}", Uuid::new_v4()),
+            run_id: format!("run-{}", &Uuid::new_v4().simple().to_string()[..12]),
             incident_id: incident_id.to_string(),
             status: "QUEUED".to_string(),
             created_at: now,
-            alert_context: build_alert_context(incident),
-            progress_message: "诊断任务已创建，等待执行".to_string(),
+            alert_context: alert_context.clone(),
+            current_step: "等待诊断任务开始".to_string(),
+            progress_message: "诊断任务已入队".to_string(),
+            evidence: vec![context_evidence(
+                "alert_context",
+                "注入给 AI 的告警上下文",
+                &alert_context,
+                now,
+            )],
             ..DiagnosisRun::default()
         };
         incident.diagnosis_runs.push(run.clone());
@@ -132,6 +141,111 @@ impl IncidentService {
         self.vector_search_service
             .search_incident_cases(&query, top_k.max(1))
             .await
+    }
+
+    /// 标记诊断开始（对齐 Java `markRunRunning`）。
+    pub fn mark_running(&self, incident_id: &str, run_id: &str) {
+        mutate_run(&self.incidents, incident_id, run_id, |run| {
+            let now = now_millis();
+            run.status = "RUNNING".to_string();
+            run.started_at = now;
+            run.current_step = "正在拆解诊断任务".to_string();
+            run.progress_message = "AI Ops 诊断已开始".to_string();
+            run.current_tool = String::new();
+        });
+    }
+
+    /// 标记正在等待工具返回（对齐 Java `markRunWaitingTool`）。
+    pub fn mark_waiting_tool(
+        &self,
+        incident_id: &str,
+        run_id: &str,
+        tool_name: &str,
+        query_params: &str,
+    ) {
+        mutate_run(&self.incidents, incident_id, run_id, |run| {
+            apply_waiting_tool(run, tool_name, query_params);
+        });
+    }
+
+    /// 追加一条工具证据并回到 RUNNING（对齐 Java `addToolEvidence`）。
+    pub fn add_tool_evidence(&self, incident_id: &str, run_id: &str, evidence: DiagnosisEvidence) {
+        mutate_run(&self.incidents, incident_id, run_id, |run| {
+            apply_tool_evidence(run, evidence);
+        });
+    }
+
+    /// 更新 run 的告警上下文并同步 alert_context 证据（对齐 Java `updateRunAlertContext`）。
+    pub fn update_run_alert_context(&self, incident_id: &str, run_id: &str, alert_context: &str) {
+        mutate_run(&self.incidents, incident_id, run_id, |run| {
+            run.alert_context = alert_context.to_string();
+            if let Some(evidence) = run
+                .evidence
+                .iter_mut()
+                .find(|item| item.evidence_type == "alert_context")
+            {
+                evidence.content = alert_context.to_string();
+                evidence.summary = alert_context.to_string();
+                evidence.raw_fragment = alert_context.to_string();
+            } else {
+                run.evidence.push(context_evidence(
+                    "alert_context",
+                    "注入给 AI 的告警上下文",
+                    alert_context,
+                    now_millis(),
+                ));
+            }
+        });
+    }
+
+    /// 完成诊断：写入经证据守卫后处理的报告（对齐 Java `completeRun` + `guardReport`）。
+    pub fn complete_run(&self, incident_id: &str, run_id: &str, report: &str) {
+        mutate_run(&self.incidents, incident_id, run_id, |run| {
+            let now = now_millis();
+            if run.started_at == 0 {
+                run.started_at = now;
+            }
+            run.status = "COMPLETED".to_string();
+            run.completed_at = now;
+            let guarded = constrain_report(report, &run.evidence);
+            run.report = guarded;
+            run.error_message = String::new();
+            run.current_tool = String::new();
+            run.current_step = "诊断完成".to_string();
+            run.progress_message = "已生成诊断报告".to_string();
+        });
+    }
+
+    /// 标记诊断失败（对齐 Java `failRun`）。
+    pub fn fail_run(&self, incident_id: &str, run_id: &str, error_message: &str) {
+        mutate_run(&self.incidents, incident_id, run_id, |run| {
+            let now = now_millis();
+            if run.started_at == 0 {
+                run.started_at = now;
+            }
+            run.status = "FAILED".to_string();
+            run.completed_at = now;
+            run.error_message = error_message.to_string();
+            run.current_tool = String::new();
+            run.current_step = "诊断失败".to_string();
+            run.progress_message = error_message.to_string();
+            run.evidence.push(context_evidence(
+                "failure_reason",
+                "诊断失败原因",
+                error_message,
+                now,
+            ));
+        });
+    }
+
+    /// 构建绑定到指定 run 的证据收集器，供 AI Ops 工具装饰器实时写入证据
+    /// （对齐 Java `DiagnosisEvidenceRecorder.withRun` 的 run 作用域）。
+    pub fn evidence_collector(&self, incident_id: &str, run_id: &str) -> EvidenceCollector {
+        EvidenceCollector {
+            incidents: Arc::clone(&self.incidents),
+            incident_id: incident_id.to_string(),
+            run_id: run_id.to_string(),
+        }
     }
 }
 
@@ -297,4 +411,116 @@ fn now_millis() -> i64 {
         .duration_since(UNIX_EPOCH)
         .expect("系统时间早于 Unix 纪元")
         .as_millis() as i64
+}
+
+/// 绑定到具体诊断 run 的证据收集器，由 AI Ops 工具装饰器在每次工具调用时调用。
+/// 与 [`IncidentService`] 共享同一份事故存储，写入实时可见
+/// （对齐 Java `DiagnosisEvidenceRecorder` 借助单例 `IncidentService` 持久化证据）。
+#[derive(Clone)]
+pub struct EvidenceCollector {
+    incidents: Arc<Mutex<HashMap<String, IncidentRecord>>>,
+    incident_id: String,
+    run_id: String,
+}
+
+impl EvidenceCollector {
+    /// 工具调用前：标记 run 进入等待工具状态（对齐 `markRunWaitingTool`）。
+    pub fn mark_waiting(&self, tool_name: &str, query_params: &str) {
+        mutate_run(&self.incidents, &self.incident_id, &self.run_id, |run| {
+            apply_waiting_tool(run, tool_name, query_params);
+        });
+    }
+
+    /// 工具调用后：追加证据并回到 RUNNING（对齐 `addToolEvidence`）。
+    pub fn record(&self, evidence: DiagnosisEvidence) {
+        mutate_run(&self.incidents, &self.incident_id, &self.run_id, |run| {
+            apply_tool_evidence(run, evidence);
+        });
+    }
+
+    /// 读取当前 run 已累积的证据快照，供调用 AI Ops 前增强告警上下文。
+    pub fn snapshot_evidence(&self) -> Vec<DiagnosisEvidence> {
+        let incidents = self.incidents.lock().expect("事故存储锁已损坏");
+        incidents
+            .get(&self.incident_id)
+            .and_then(|incident| {
+                incident
+                    .diagnosis_runs
+                    .iter()
+                    .find(|run| run.run_id == self.run_id)
+            })
+            .map(|run| run.evidence.clone())
+            .unwrap_or_default()
+    }
+}
+
+/// 在锁内定位并修改指定 run，随后刷新 incident 的 `updated_at`。
+fn mutate_run<F>(
+    incidents: &Mutex<HashMap<String, IncidentRecord>>,
+    incident_id: &str,
+    run_id: &str,
+    mutator: F,
+) where
+    F: FnOnce(&mut DiagnosisRun),
+{
+    let mut incidents = incidents.lock().expect("事故存储锁已损坏");
+    let Some(incident) = incidents.get_mut(incident_id) else {
+        return;
+    };
+    let mutated = match incident
+        .diagnosis_runs
+        .iter_mut()
+        .find(|run| run.run_id == run_id)
+    {
+        Some(run) => {
+            mutator(run);
+            true
+        }
+        None => false,
+    };
+    if mutated {
+        incident.updated_at = now_millis();
+    }
+}
+
+/// 标记 run 正在调用某工具（被 IncidentService 与 EvidenceCollector 共用）。
+fn apply_waiting_tool(run: &mut DiagnosisRun, tool_name: &str, query_params: &str) {
+    if run.started_at == 0 {
+        run.started_at = now_millis();
+    }
+    run.status = "WAITING_TOOL".to_string();
+    run.current_tool = tool_name.to_string();
+    run.current_step = format!("正在调用工具 {tool_name}");
+    run.progress_message = query_params.to_string();
+}
+
+/// 追加工具证据并回到 RUNNING（被 IncidentService 与 EvidenceCollector 共用）。
+fn apply_tool_evidence(run: &mut DiagnosisRun, evidence: DiagnosisEvidence) {
+    let tool_name = evidence.tool_name.clone();
+    let summary = evidence.summary.clone();
+    run.evidence.push(evidence);
+    run.status = "RUNNING".to_string();
+    run.current_tool = String::new();
+    run.current_step = format!("已完成工具调用 {tool_name}");
+    run.progress_message = summary;
+}
+
+/// 构造非工具类证据（alert_context / failure_reason 等，对齐 Java `DiagnosisEvidence.of`）。
+fn context_evidence(
+    evidence_type: &str,
+    title: &str,
+    content: &str,
+    created_at: i64,
+) -> DiagnosisEvidence {
+    DiagnosisEvidence {
+        id: format!("ev-{}", &Uuid::new_v4().simple().to_string()[..12]),
+        evidence_type: evidence_type.to_string(),
+        title: title.to_string(),
+        content: content.to_string(),
+        summary: content.to_string(),
+        raw_fragment: content.to_string(),
+        success: true,
+        created_at,
+        ..DiagnosisEvidence::default()
+    }
 }

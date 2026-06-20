@@ -9,6 +9,7 @@
 
 use crate::{
     agent::{
+        evidence::RecordingTool,
         logs_tools::{GetAvailableLogTopicsTool, QueryLogsTool},
         metrics_tools::{QueryMetricTrendTool, QueryPrometheusAlertsTool},
     },
@@ -16,6 +17,8 @@ use crate::{
     error::AppError,
     services::{
         chat_service::{GetCurrentDateTimeTool, QueryInternalDocsTool},
+        diagnosis_report_service::augment_alert_context,
+        incident_service::EvidenceCollector,
         vector_search_service::VectorSearchService,
     },
 };
@@ -26,6 +29,7 @@ use rig::{
     tool::ToolDyn,
 };
 use serde_json::Value;
+use std::sync::Arc;
 use tracing::{info, warn};
 
 #[derive(Clone)]
@@ -68,7 +72,7 @@ impl AiOpsService {
     /// 始终包含：时间、内部文档、Prometheus 告警、指标趋势；
     /// 当 `cls_mock_enabled` 为真时（对应 Java 的 mock 模式注册 QueryLogsTools），
     /// 追加日志查询与日志主题工具。
-    fn build_method_tools(&self) -> Vec<Box<dyn ToolDyn>> {
+    fn build_method_tools(&self, collector: Option<&Arc<EvidenceCollector>>) -> Vec<Box<dyn ToolDyn>> {
         let mut tools: Vec<Box<dyn ToolDyn>> = vec![
             Box::new(GetCurrentDateTimeTool),
             Box::new(QueryInternalDocsTool {
@@ -89,7 +93,17 @@ impl AiOpsService {
             tools.push(Box::new(QueryLogsTool { mock_enabled: true }));
             tools.push(Box::new(GetAvailableLogTopicsTool));
         }
-        tools
+        // 诊断 run 路径：用 RecordingTool 包装每个工具，实时记录证据并注入 evidence id
+        // （对齐 Java 5 参数 executeAiOpsAnalysis 的 wrapToolCallbacks；普通 /ai_ops 路径 collector 为 None，不包装）。
+        match collector {
+            Some(collector) => tools
+                .into_iter()
+                .map(|tool| {
+                    Box::new(RecordingTool::new(tool, Arc::clone(collector))) as Box<dyn ToolDyn>
+                })
+                .collect(),
+            None => tools,
+        }
     }
 
     /// 执行 AI Ops 告警分析流程。
@@ -100,6 +114,27 @@ impl AiOpsService {
     pub async fn execute_ai_ops_analysis(
         &self,
         alert_context: Option<&str>,
+    ) -> Result<String, AppError> {
+        self.execute_internal(alert_context, None).await
+    }
+
+    /// 在指定诊断 run 上下文中执行 AI Ops（对齐 Java 5 参数 `executeAiOpsAnalysis`）：
+    /// 先用已累积证据增强告警上下文（`augmentAlertContext`），并以 `RecordingTool`
+    /// 包装工具，实时记录证据并向工具返回注入 `_diagnosisEvidenceId`。
+    pub async fn execute_ai_ops_analysis_for_run(
+        &self,
+        alert_context: Option<&str>,
+        collector: Arc<EvidenceCollector>,
+    ) -> Result<String, AppError> {
+        let evidence = collector.snapshot_evidence();
+        let augmented = augment_alert_context(alert_context.unwrap_or(""), &evidence);
+        self.execute_internal(Some(&augmented), Some(collector)).await
+    }
+
+    async fn execute_internal(
+        &self,
+        alert_context: Option<&str>,
+        collector: Option<Arc<EvidenceCollector>>,
     ) -> Result<String, AppError> {
         info!("开始执行 AI Ops 多 Agent 协作流程");
 
@@ -172,7 +207,13 @@ impl AiOpsService {
                 let executor_message =
                     format!("Planner 最新输出如下，请只执行其中的第一步：\n{planner_plan}");
                 executor_feedback = self
-                    .run_agent(&client, "executor_agent", &executor_preamble, executor_message)
+                    .run_agent(
+                        &client,
+                        "executor_agent",
+                        &executor_preamble,
+                        executor_message,
+                        collector.as_ref(),
+                    )
                     .await?;
             } else {
                 // Planner：拆解 / 再规划（Finish 已在上方转为 Planner 收尾）
@@ -187,7 +228,13 @@ impl AiOpsService {
 
                 info!("[AI Ops] 第 {} 步：调用 Planner Agent", step + 1);
                 planner_plan = self
-                    .run_agent(&client, "planner_agent", &planner_preamble, planner_message)
+                    .run_agent(
+                        &client,
+                        "planner_agent",
+                        &planner_preamble,
+                        planner_message,
+                        collector.as_ref(),
+                    )
                     .await?;
                 last_planner = planner_plan.clone();
 
@@ -207,6 +254,7 @@ impl AiOpsService {
                 "planner_agent",
                 &planner_preamble,
                 "已达到最大编排轮次，请立即基于已有证据输出完整 Markdown《告警分析报告》（decision=FINISH，纯 Markdown，不要 JSON）。如证据不足，请在报告中如实说明缺失证据。".to_string(),
+                collector.as_ref(),
             )
             .await;
 
@@ -222,6 +270,7 @@ impl AiOpsService {
         name: &str,
         preamble: &str,
         message: String,
+        collector: Option<&Arc<EvidenceCollector>>,
     ) -> Result<String, AppError> {
         let agent = client
             .agent(&self.model)
@@ -232,7 +281,7 @@ impl AiOpsService {
             // rig 0.36 的 AgentBuilder 无 top_p 方法，topP 经 additional_params 注入请求体
             .additional_params(serde_json::json!({ "top_p": 0.9 }))
             .preamble(preamble)
-            .tools(self.build_method_tools())
+            .tools(self.build_method_tools(collector))
             .build();
 
         agent

@@ -6,5 +6,6 @@
 //! 时间与内部文档工具复用 [`crate::services::chat_service`] 中的
 //! `GetCurrentDateTimeTool` 与 `QueryInternalDocsTool`。
 
+pub mod evidence;
 pub mod logs_tools;
 pub mod metrics_tools;

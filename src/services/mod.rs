@@ -2,6 +2,7 @@ pub mod ai_ops_service;
 pub mod alert_service;
 pub mod chat_history_store;
 pub mod chat_service;
+pub mod diagnosis_report_service;
 pub mod document_chunk_service;
 pub mod incident_service;
 pub mod index_task_status_service;
