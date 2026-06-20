@@ -5,6 +5,7 @@ pub mod incident_service;
 pub mod index_task_status_service;
 pub mod memory_extraction_service;
 pub mod milvus_service;
+pub mod openai_responses_rectifier;
 pub mod session_manager;
 pub mod vector_embedding_service;
 pub mod vector_index_service;

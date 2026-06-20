@@ -14,6 +14,7 @@ pub struct AppConfig {
     pub dashscope_api_key: Option<String>,
     pub dashscope_base_url: String,
     pub dashscope_api_base_url: String,
+    pub dashscope_responses_rectifier_enabled: bool,
     pub dashscope_chat_model: String,
     pub chat_agent_max_turns: usize,
     pub dashscope_embedding_model: String,
@@ -53,6 +54,8 @@ impl AppConfig {
             .unwrap_or_else(|| "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string());
         let dashscope_api_base_url = read_string("DASHSCOPE_API_BASE_URL")?
             .unwrap_or_else(|| "https://dashscope.aliyuncs.com/api/v1".to_string());
+        let dashscope_responses_rectifier_enabled =
+            read_bool("DASHSCOPE_RESPONSES_RECTIFIER_ENABLED")?.unwrap_or(false);
         let dashscope_chat_model =
             read_string("DASHSCOPE_CHAT_MODEL")?.unwrap_or_else(|| "qwen-plus".to_string());
         let chat_agent_max_turns = read_usize("APP_CHAT_AGENT_MAX_TURNS")?.unwrap_or(6);
@@ -149,6 +152,7 @@ impl AppConfig {
             dashscope_api_key,
             dashscope_base_url,
             dashscope_api_base_url,
+            dashscope_responses_rectifier_enabled,
             dashscope_chat_model,
             chat_agent_max_turns,
             dashscope_embedding_model,

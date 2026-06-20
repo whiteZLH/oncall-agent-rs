@@ -2,7 +2,10 @@ use crate::{
     config::AppConfig,
     domain::{chat::ChatMessage, memory::PrivateMemorySearchResult},
     error::AppError,
-    services::vector_search_service::VectorSearchService,
+    services::{
+        openai_responses_rectifier::ResponsesRectifierHttpClient,
+        vector_search_service::VectorSearchService,
+    },
 };
 use futures_util::{Stream, StreamExt};
 use rig::{
@@ -27,6 +30,7 @@ const REACT_AGENT_NAME: &str = "intelligent_assistant";
 pub struct ChatService {
     api_key: Option<String>,
     base_url: String,
+    responses_rectifier_enabled: bool,
     model: String,
     max_turns: usize,
     vector_search_service: Option<VectorSearchService>,
@@ -75,6 +79,7 @@ impl ChatService {
         Self {
             api_key: config.dashscope_api_key.clone(),
             base_url: config.dashscope_api_base_url.clone(),
+            responses_rectifier_enabled: config.dashscope_responses_rectifier_enabled,
             model: config.dashscope_chat_model.clone(),
             max_turns: config.chat_agent_max_turns,
             vector_search_service: None,
@@ -227,6 +232,9 @@ impl ChatService {
         let client = openai::Client::builder()
             .api_key(api_key)
             .base_url(&self.base_url)
+            .http_client(ResponsesRectifierHttpClient::new(
+                self.responses_rectifier_enabled,
+            ))
             .build()
             .map_err(|error| {
                 AppError::internal(format!("初始化 rig OpenAI client 失败: {error}"))
@@ -470,11 +478,11 @@ mod tests {
             redis_url: None,
             chat_history_path: "./target/test-chat-history".to_string(),
             session_ttl_secs: 3600,
-            dashscope_api_key: Some(
-                "REDACTED_DASHSCOPE_KEY".to_string(),
-            ),
+            dashscope_api_key: env::var("DASHSCOPE_API_KEY").ok(),
             dashscope_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
             dashscope_api_base_url: "https://anyrouter.top/v1".to_string(),
+            // dashscope_api_base_url: "https://api.liangrekui.com/v1".to_string(),
+            dashscope_responses_rectifier_enabled: true,
             dashscope_chat_model: "GPT-5.5".to_string(),
             chat_agent_max_turns: 6,
             dashscope_embedding_model: "text-embedding-v4".to_string(),
@@ -638,12 +646,12 @@ mod tests {
     async fn execute_offical_example() -> Result<(), Box<dyn std::error::Error>> {
         init_test_tracing();
 
-        // 覆盖已存在的环境变量，若不存在则会创建
-        env::set_var(
-            "OPENAI_API_KEY",
-            "REDACTED_OPENAI_KEY",
-        );
-        env::set_var("OPENAI_BASE_URL", "https://api.liangrekui.com/v1");
+        // 改为从环境变量读取，避免在源码中硬编码密钥；
+        // 未配置 OPENAI_API_KEY 时跳过该联网测试。
+        if env::var("OPENAI_API_KEY").is_err() {
+            eprintln!("跳过 execute_offical_example：未设置 OPENAI_API_KEY 环境变量");
+            return Ok(());
+        }
 
         let client = openai::Client::from_env()?;
 
