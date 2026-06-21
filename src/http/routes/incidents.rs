@@ -117,13 +117,30 @@ async fn execute_diagnosis_run(
     } else {
         Some(alert_context.as_str())
     };
+    let chat_model = state.ai_ops_service.chat_model();
+    let tool_callbacks = state.ai_ops_service.tool_callbacks();
 
     match state
         .ai_ops_service
-        .execute_ai_ops_analysis_for_run(context, collector)
+        .execute_ai_ops_analysis_with_run(
+            &chat_model,
+            &tool_callbacks,
+            context,
+            &incident_id,
+            &run_id,
+            Some(collector),
+        )
         .await
     {
-        Ok(report) if !report.trim().is_empty() => {
+        Ok(Some(over_all_state)) => {
+            let Some(report) = state.ai_ops_service.extract_final_report(&over_all_state) else {
+                state.incident_service.fail_run(
+                    &incident_id,
+                    &run_id,
+                    "多 Agent 流程完成，但未能提取最终报告",
+                );
+                return;
+            };
             state
                 .incident_service
                 .complete_run(&incident_id, &run_id, &report);
@@ -132,19 +149,23 @@ async fn execute_diagnosis_run(
                 incident_id, run_id
             );
         }
-        Ok(_) => {
-            state
-                .incident_service
-                .fail_run(&incident_id, &run_id, "多 Agent 流程完成，但未能提取最终报告");
+        Ok(None) => {
+            state.incident_service.fail_run(
+                &incident_id,
+                &run_id,
+                "多 Agent 流程完成，但未能提取最终报告",
+            );
         }
         Err(error) => {
             warn!(
                 "Incident 诊断执行异常, incidentId: {}, runId: {}, error: {}",
                 incident_id, run_id, error
             );
-            state
-                .incident_service
-                .fail_run(&incident_id, &run_id, &format!("告警分析异常: {error}"));
+            state.incident_service.fail_run(
+                &incident_id,
+                &run_id,
+                &format!("告警分析异常: {error}"),
+            );
         }
     }
 }

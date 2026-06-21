@@ -120,7 +120,10 @@ fn detect_success(raw_result: &str) -> bool {
         return true;
     }
     // 非 JSON：仅当文本明确包含 "success":false 时判失败。
-    !raw_result.to_lowercase().replace(' ', "").contains("\"success\":false")
+    !raw_result
+        .to_lowercase()
+        .replace(' ', "")
+        .contains("\"success\":false")
 }
 
 /// 生成证据摘要（对齐 Java `summarize`，上限 [`SUMMARY_LIMIT`]）。
@@ -212,7 +215,9 @@ mod tests {
     #[test]
     fn detect_success_reads_success_flag() {
         assert!(detect_success(r#"{"success":true,"message":"ok"}"#));
-        assert!(!detect_success(r#"{"success":false,"errorCode":"DEPENDENCY_ERROR"}"#));
+        assert!(!detect_success(
+            r#"{"success":false,"errorCode":"DEPENDENCY_ERROR"}"#
+        ));
     }
 
     #[test]
@@ -233,7 +238,10 @@ mod tests {
     fn summarize_prefers_error_then_message() {
         assert_eq!(summarize("{}", Some("超时")), "工具调用失败: 超时");
         assert_eq!(summarize(r#"{"message":"近1h无异常"}"#, None), "近1h无异常");
-        assert_eq!(summarize(r#"{"status":"no_results"}"#, None), "status=no_results");
+        assert_eq!(
+            summarize(r#"{"status":"no_results"}"#, None),
+            "status=no_results"
+        );
         assert_eq!(summarize("", None), "工具调用完成，返回为空");
     }
 

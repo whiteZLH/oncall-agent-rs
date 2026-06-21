@@ -3,7 +3,7 @@ use crate::{
     domain::{chat::ChatMessage, memory::PrivateMemorySearchResult},
     error::AppError,
     services::{
-        openai_responses_rectifier::ResponsesRectifierHttpClient,
+        agent_runtime::ReactAgent, openai_responses_rectifier::ResponsesRectifierHttpClient,
         vector_search_service::VectorSearchService,
     },
 };
@@ -34,16 +34,6 @@ pub struct ChatService {
     model: String,
     max_turns: usize,
     vector_search_service: Option<VectorSearchService>,
-}
-
-#[derive(Clone)]
-pub struct ReactAgent {
-    name: String,
-    model: String,
-    system_prompt: String,
-    method_tools: Vec<String>,
-    tool_callbacks: Vec<String>,
-    max_turns: usize,
 }
 
 pub type ChatResponseStream = Pin<Box<dyn Stream<Item = Result<ChatStreamEvent, AppError>> + Send>>;
@@ -183,21 +173,15 @@ impl ChatService {
     }
 
     pub fn create_react_agent(&self, model: &str, system_prompt: &str) -> ReactAgent {
-        let agent = ReactAgent {
-            name: REACT_AGENT_NAME.to_string(),
-            model: model.to_string(),
-            system_prompt: system_prompt.to_string(),
-            method_tools: self.build_method_tools_array(),
-            tool_callbacks: self.get_tool_callbacks(),
-            max_turns: self.max_turns,
-        };
+        let agent = ReactAgent::new(REACT_AGENT_NAME, model, system_prompt, self.max_turns)
+            .with_tool_metadata(self.build_method_tools_array(), self.get_tool_callbacks());
         info!(
             "创建 ReactAgent - name: {}, model: {}, method_tools: {}, tools: {}, max_turns: {}",
-            agent.name,
-            agent.model,
-            agent.method_tools.len(),
-            agent.tool_callbacks.len(),
-            agent.max_turns
+            agent.name(),
+            agent.model(),
+            agent.method_tools().len(),
+            agent.tool_callbacks().len(),
+            agent.max_turns()
         );
         agent
     }
@@ -241,9 +225,9 @@ impl ChatService {
             })?;
 
         let runtime_agent = client
-            .agent(&agent.model)
-            .name(&agent.name)
-            .preamble(&agent.system_prompt)
+            .agent(agent.model())
+            .name(agent.name())
+            .preamble(agent.preamble())
             // .default_max_turns(agent.max_turns)
             .tools(vec![])
             .build();
@@ -260,7 +244,7 @@ impl ChatService {
             // .max_turns(agent.max_turns)
             // .with_tool_concurrency(1)
             .await
-            .map_err(|error: PromptError| map_prompt_error(error, agent.max_turns))?;
+            .map_err(|error: PromptError| map_prompt_error(error, agent.max_turns()))?;
         Ok(answer)
     }
 
@@ -286,18 +270,18 @@ impl ChatService {
             })?;
 
         let runtime_agent = client
-            .agent(&agent.model)
-            .name(&agent.name)
-            .preamble(&agent.system_prompt)
-            .default_max_turns(agent.max_turns)
+            .agent(agent.model())
+            .name(agent.name())
+            .preamble(agent.preamble())
+            .default_max_turns(agent.max_turns())
             .tools(self.build_method_tools())
             .build();
 
         let mut response_stream = runtime_agent
             .stream_prompt(question.to_string())
-            .multi_turn(agent.max_turns)
+            .multi_turn(agent.max_turns())
             .await;
-        let max_turns = agent.max_turns;
+        let max_turns = agent.max_turns();
 
         Ok(Box::pin(async_stream::stream! {
             while let Some(item) = response_stream.next().await {
@@ -541,18 +525,18 @@ mod tests {
         let service = ChatService::new(&test_config());
         let agent = service.create_react_agent("qwen-plus", "prompt-with-history");
 
-        assert_eq!(agent.name, "intelligent_assistant");
-        assert_eq!(agent.model, "qwen-plus");
-        assert_eq!(agent.system_prompt, "prompt-with-history");
-        assert_eq!(agent.max_turns, 6);
+        assert_eq!(agent.name(), "intelligent_assistant");
+        assert_eq!(agent.model(), "qwen-plus");
+        assert_eq!(agent.preamble(), "prompt-with-history");
+        assert_eq!(agent.max_turns(), 6);
         assert_eq!(
-            agent.method_tools,
+            agent.method_tools(),
             vec![
                 "getCurrentDateTime".to_string(),
                 "queryInternalDocs".to_string()
             ]
         );
-        assert!(agent.tool_callbacks.is_empty());
+        assert!(agent.tool_callbacks().is_empty());
     }
 
     #[tokio::test]

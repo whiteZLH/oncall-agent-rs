@@ -107,9 +107,18 @@ pub fn constrain_report(report: &str, evidence: &[DiagnosisEvidence]) -> String 
         .cloned()
         .collect();
 
-    let missing_evidence =
-        find_missing_evidence(safe_report, &usable_evidence, &known_cited_ids, &tool_evidence);
-    let confidence = confidence(&unknown_ids, &invalid_ids, &missing_evidence, &known_cited_ids);
+    let missing_evidence = find_missing_evidence(
+        safe_report,
+        &usable_evidence,
+        &known_cited_ids,
+        &tool_evidence,
+    );
+    let confidence = confidence(
+        &unknown_ids,
+        &invalid_ids,
+        &missing_evidence,
+        &known_cited_ids,
+    );
     let status = validation_status(&unknown_ids, &invalid_ids, &missing_evidence);
 
     format!(
@@ -158,14 +167,24 @@ fn find_missing_evidence(
     {
         missing.push("资源类结论缺少成功的 queryMetricTrend 趋势 evidence".to_string());
     }
-    let has_successful_logs = has_cited_successful_tool(known_cited_ids, usable_evidence, "queryLogs");
+    let has_successful_logs =
+        has_cited_successful_tool(known_cited_ids, usable_evidence, "queryLogs");
     let contains_jvm_claim = contains_jvm_evidence_claim(report);
     let has_successful_jvm_text = has_cited_evidence_text(
         known_cited_ids,
         usable_evidence,
-        &["GC", "Full GC", "gc_", "OutOfMemory", "OutOfMemoryError", "OOM"],
+        &[
+            "GC",
+            "Full GC",
+            "gc_",
+            "OutOfMemory",
+            "OutOfMemoryError",
+            "OOM",
+        ],
     );
-    if contains_log_claim(report) && !has_successful_logs && !(contains_jvm_claim && has_successful_jvm_text)
+    if contains_log_claim(report)
+        && !has_successful_logs
+        && !(contains_jvm_claim && has_successful_jvm_text)
     {
         missing.push("日志/异常结论缺少成功的 queryLogs evidence".to_string());
     }
@@ -260,8 +279,17 @@ fn contains_resource_claim(report: &str) -> bool {
     contains_any(
         report,
         &[
-            "CPU", "cpu", "内存", "memory", "错误率", "error_rate", "P99", "延迟", "latency",
-            "restart", "重启",
+            "CPU",
+            "cpu",
+            "内存",
+            "memory",
+            "错误率",
+            "error_rate",
+            "P99",
+            "延迟",
+            "latency",
+            "restart",
+            "重启",
         ],
     )
 }
@@ -269,7 +297,15 @@ fn contains_resource_claim(report: &str) -> bool {
 fn contains_log_claim(report: &str) -> bool {
     contains_any(
         report,
-        &["日志", "log", "ERROR", "OOM", "OutOfMemory", "异常日志", "错误日志"],
+        &[
+            "日志",
+            "log",
+            "ERROR",
+            "OOM",
+            "OutOfMemory",
+            "异常日志",
+            "错误日志",
+        ],
     )
 }
 
@@ -277,7 +313,13 @@ fn contains_jvm_evidence_claim(report: &str) -> bool {
     contains_any(
         report,
         &[
-            "OOM", "OutOfMemory", "Full GC", "GC 风暴", "GC overhead", "Garbage Collection", "gc_",
+            "OOM",
+            "OutOfMemory",
+            "Full GC",
+            "GC 风暴",
+            "GC overhead",
+            "Garbage Collection",
+            "gc_",
         ],
     )
 }
@@ -315,7 +357,10 @@ fn validation_status(
     "通过"
 }
 
-fn invalid_evidence_summary(invalid_ids: &[String], tool_evidence: &[&DiagnosisEvidence]) -> String {
+fn invalid_evidence_summary(
+    invalid_ids: &[String],
+    tool_evidence: &[&DiagnosisEvidence],
+) -> String {
     if invalid_ids.is_empty() {
         return "无".to_string();
     }
@@ -323,7 +368,9 @@ fn invalid_evidence_summary(invalid_ids: &[String], tool_evidence: &[&DiagnosisE
         .iter()
         .map(|id| {
             let evidence = tool_evidence.iter().find(|item| &item.id == id);
-            let mut reason = evidence.map(|item| item.error_code.clone()).unwrap_or_default();
+            let mut reason = evidence
+                .map(|item| item.error_code.clone())
+                .unwrap_or_default();
             if reason.is_empty() {
                 reason = match evidence {
                     Some(item) if !item.success => "success=false".to_string(),

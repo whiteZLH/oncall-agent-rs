@@ -1,3 +1,4 @@
+pub mod agent_runtime;
 pub mod ai_ops_service;
 pub mod alert_service;
 pub mod chat_history_store;

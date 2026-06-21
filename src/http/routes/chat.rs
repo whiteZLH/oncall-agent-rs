@@ -186,10 +186,7 @@ async fn chat_stream(
 
 /// AI 智能运维接口（SSE 流式）：自动分析告警并生成运维报告。
 /// 对应 Java 版本 `ChatController.aiOps`（POST /api/ai_ops）。
-async fn ai_ops(
-    State(state): State<Arc<AppState>>,
-    body: Option<Json<AiOpsRequest>>,
-) -> Response {
+async fn ai_ops(State(state): State<Arc<AppState>>, body: Option<Json<AiOpsRequest>>) -> Response {
     let payload = body.map(|Json(payload)| payload).unwrap_or_default();
     let alert_context = payload
         .alert_context
@@ -206,9 +203,15 @@ async fn ai_ops(
         // 与 Java 一致：先回送任务拆解提示
         yield sse_event(SseMessage::content("正在读取告警并拆解任务...\n"));
 
-        let report = match state
+        let chat_model = state.ai_ops_service.chat_model();
+        let tool_callbacks = state.ai_ops_service.tool_callbacks();
+        let over_all_state = match state
             .ai_ops_service
-            .execute_ai_ops_analysis(alert_context.as_deref())
+            .execute_ai_ops_analysis_with_context(
+                &chat_model,
+                &tool_callbacks,
+                alert_context.as_deref(),
+            )
             .await
         {
             Ok(report) => report,
@@ -219,14 +222,21 @@ async fn ai_ops(
             }
         };
 
-        if report.trim().is_empty() {
+        let Some(over_all_state) = over_all_state else {
+            warn!("AI Ops 多 Agent 编排未获取到有效结果");
+            yield sse_event(SseMessage::error("多 Agent 编排未获取到有效结果"));
+            yield sse_event(SseMessage::done());
+            return;
+        };
+
+        let Some(report) = state.ai_ops_service.extract_final_report(&over_all_state) else {
             warn!("未能提取到 Planner 最终报告");
             yield sse_event(SseMessage::content(
                 "⚠️ 多 Agent 流程已完成，但未能生成最终报告。",
             ));
             yield sse_event(SseMessage::done());
             return;
-        }
+        };
 
         info!("提取到 Planner 最终报告，长度: {}", report.chars().count());
 

@@ -104,8 +104,8 @@ impl AppConfig {
         let prometheus_timeout_secs = read_u64("PROMETHEUS_TIMEOUT")?.unwrap_or(10);
         let prometheus_mock_enabled = read_bool("PROMETHEUS_MOCK_ENABLED")?.unwrap_or(false);
         let cls_mock_enabled = read_bool("CLS_MOCK_ENABLED")?.unwrap_or(false);
-        let ai_ops_chat_model =
-            read_string("DASHSCOPE_AI_OPS_CHAT_MODEL")?.unwrap_or_else(|| dashscope_chat_model.clone());
+        let ai_ops_chat_model = read_string("DASHSCOPE_AI_OPS_CHAT_MODEL")?
+            .unwrap_or_else(|| dashscope_chat_model.clone());
         let ai_ops_agent_max_turns = read_usize("APP_AI_OPS_AGENT_MAX_TURNS")?.unwrap_or(12);
         let ai_ops_max_rounds = read_usize("APP_AI_OPS_MAX_ROUNDS")?.unwrap_or(8);
 

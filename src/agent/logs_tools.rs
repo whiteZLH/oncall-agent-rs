@@ -169,7 +169,14 @@ fn now_shanghai_minus(minutes: i64) -> String {
         .to_string()
 }
 
-fn log_entry(timestamp: String, level: &str, service: &str, instance: &str, message: String, metrics: Value) -> Value {
+fn log_entry(
+    timestamp: String,
+    level: &str,
+    service: &str,
+    instance: &str,
+    message: String,
+    metrics: Value,
+) -> Value {
     json!({
         "timestamp": timestamp,
         "level": level,
@@ -214,7 +221,10 @@ fn build_system_metrics_logs(query: &str) -> Vec<Value> {
                 "WARN",
                 "payment-service",
                 "pod-payment-service-7d8f9c6b5-x2k4m",
-                format!("CPU使用率过高: {:.1}%, 进程: java (PID: 1), 线程数: 245", 92.0 - i as f64 * 1.5),
+                format!(
+                    "CPU使用率过高: {:.1}%, 进程: java (PID: 1), 线程数: 245",
+                    92.0 - i as f64 * 1.5
+                ),
                 json!({
                     "cpu_usage": format!("{:.1}", 92.0 - i as f64 * 1.5),
                     "cpu_cores": "4",
@@ -328,13 +338,21 @@ fn build_application_logs(query: &str) -> Vec<Value> {
     }
     if query.contains("response_time") || query.contains("slow") || query.contains(">3000") {
         for i in 0..5 {
-            let uri = if i % 2 == 0 { "/api/v1/users/profile" } else { "/api/v1/users/orders" };
+            let uri = if i % 2 == 0 {
+                "/api/v1/users/profile"
+            } else {
+                "/api/v1/users/orders"
+            };
             logs.push(log_entry(
                 now_shanghai_minus(i as i64 * 2),
                 "WARN",
                 "user-service",
                 "pod-user-service-8e9f0a1b2-k5j6h",
-                format!("慢请求警告: {}, 响应时间: {}ms, 阈值: 3000ms", uri, 4200 - i * 150),
+                format!(
+                    "慢请求警告: {}, 响应时间: {}ms, 阈值: 3000ms",
+                    uri,
+                    4200 - i * 150
+                ),
                 json!({
                     "uri": uri,
                     "response_time_ms": (4200 - i * 150).to_string(),
@@ -345,7 +363,11 @@ fn build_application_logs(query: &str) -> Vec<Value> {
             ));
         }
     }
-    if query.contains("downstream") || query.contains("redis") || query.contains("database") || query.contains("mq") {
+    if query.contains("downstream")
+        || query.contains("redis")
+        || query.contains("database")
+        || query.contains("mq")
+    {
         logs.push(log_entry(
             now_shanghai_minus(7),
             "ERROR",
@@ -440,7 +462,8 @@ fn build_system_events_logs(query: &str) -> Vec<Value> {
             "ERROR",
             "kernel",
             "node-worker-02",
-            "OOM Killer 触发: 进程 java (PID: 12345) 被杀死, 内存使用: 3.9GB, 内存限制: 4GB".to_string(),
+            "OOM Killer 触发: 进程 java (PID: 12345) 被杀死, 内存使用: 3.9GB, 内存限制: 4GB"
+                .to_string(),
             json!({
                 "event_type": "OOMKill",
                 "process": "java",

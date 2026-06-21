@@ -70,7 +70,10 @@ Use this tool when you need to check what alerts are currently firing, investiga
     }
 
     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("开始查询 Prometheus 活动告警, Mock模式: {}", self.mock_enabled);
+        info!(
+            "开始查询 Prometheus 活动告警, Mock模式: {}",
+            self.mock_enabled
+        );
 
         let alerts = if self.mock_enabled {
             let mock = build_mock_alerts();
@@ -123,7 +126,9 @@ impl QueryPrometheusAlertsTool {
         if body.get("status").and_then(Value::as_str) != Some("success") {
             return Err(format!(
                 "Prometheus API 返回非成功状态: {}",
-                body.get("status").and_then(Value::as_str).unwrap_or("unknown")
+                body.get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
             ));
         }
 
@@ -152,8 +157,16 @@ impl QueryPrometheusAlertsTool {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                let state = alert.get("state").and_then(Value::as_str).unwrap_or("").to_string();
-                let active_at = alert.get("activeAt").and_then(Value::as_str).unwrap_or("").to_string();
+                let state = alert
+                    .get("state")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let active_at = alert
+                    .get("activeAt")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
                 let duration = duration_from_active_at(&active_at, now);
                 simplified.push(json!({
                     "alert_name": alert_name,
@@ -229,7 +242,10 @@ Returns points, PromQL query, min/max/avg/latest, direction, anomaly flag, and m
             match self.fetch_prometheus_trend(&query, &window, &step).await {
                 Ok(points) => points,
                 Err(error) => {
-                    warn!("查询指标趋势失败, metric: {}, query: {}: {}", metric, query, error);
+                    warn!(
+                        "查询指标趋势失败, metric: {}, query: {}: {}",
+                        metric, query, error
+                    );
                     return Ok(build_metric_trend_error(
                         &metric,
                         &window,
@@ -318,7 +334,9 @@ impl QueryMetricTrendTool {
                     continue;
                 };
                 for value in values {
-                    let Some(pair) = value.as_array() else { continue };
+                    let Some(pair) = value.as_array() else {
+                        continue;
+                    };
                     if pair.len() < 2 {
                         continue;
                     }
@@ -410,7 +428,8 @@ fn build_mock_trend_points(metric: &str, window: &str, step: &str) -> Vec<Value>
         } else {
             total * i as i64 / (count - 1) as i64
         };
-        let ts = (start + ChronoDuration::seconds(offset)).to_rfc3339_opts(SecondsFormat::Secs, true);
+        let ts =
+            (start + ChronoDuration::seconds(offset)).to_rfc3339_opts(SecondsFormat::Secs, true);
         points.push(json!({ "timestamp": ts, "value": round(value) }));
     }
     points
@@ -472,7 +491,12 @@ fn is_anomalous(metric: &str, latest: f64, max: f64) -> bool {
     }
 }
 
-fn build_metric_trend_message(metric: &str, window: &str, summary: &Value, points: &[Value]) -> String {
+fn build_metric_trend_message(
+    metric: &str,
+    window: &str,
+    summary: &Value,
+    points: &[Value],
+) -> String {
     if points.is_empty() {
         return format!("{metric} 最近 {window} 未查询到趋势点");
     }
@@ -499,8 +523,13 @@ fn direction_text(direction: &str) -> &'static str {
 
 fn build_metric_trend_query(metric: &str, service: &str, instance: &str) -> String {
     let app_selector = build_selector("job", service, "instance", instance, &[]);
-    let app_error_selector =
-        build_selector("job", service, "instance", instance, &[("status", "=~\"5..\"")]);
+    let app_error_selector = build_selector(
+        "job",
+        service,
+        "instance",
+        instance,
+        &[("status", "=~\"5..\"")],
+    );
     let pod_value = first_non_blank(instance, service);
     let pod_selector = build_selector("pod", pod_value, "", "", &[("container", "!\"\"")]);
     match metric {
@@ -533,7 +562,10 @@ fn build_selector(
 ) -> String {
     let mut matchers: Vec<String> = Vec::new();
     if !primary_label.is_empty() && !primary_value.trim().is_empty() {
-        matchers.push(format!("{primary_label}=~\"{}\"", regex_contains(primary_value)));
+        matchers.push(format!(
+            "{primary_label}=~\"{}\"",
+            regex_contains(primary_value)
+        ));
     }
     if !secondary_label.is_empty() && !secondary_value.trim().is_empty() {
         matchers.push(format!(
@@ -606,8 +638,7 @@ fn is_step(step: &str) -> bool {
         return false;
     }
     let (digits, unit) = bytes.split_at(bytes.len() - 1);
-    digits.iter().all(u8::is_ascii_digit)
-        && matches!(unit[0], b's' | b'm' | b'h')
+    digits.iter().all(u8::is_ascii_digit) && matches!(unit[0], b's' | b'm' | b'h')
 }
 
 fn window_seconds(window: &str) -> i64 {

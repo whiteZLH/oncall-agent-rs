@@ -68,7 +68,11 @@ pub struct ClearRequest {
 
 #[derive(Debug, Default, Deserialize)]
 pub struct AiOpsRequest {
-    #[serde(rename = "alertContext", alias = "alert_context", alias = "alertcontext")]
+    #[serde(
+        rename = "alertContext",
+        alias = "alert_context",
+        alias = "alertcontext"
+    )]
     pub alert_context: Option<String>,
     #[serde(rename = "alertId", alias = "alert_id", alias = "alertid")]
     pub alert_id: Option<String>,

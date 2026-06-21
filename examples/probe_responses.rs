@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 
 #[tokio::main]
 async fn main() {
-    let base = std::env::var("PROBE_BASE_URL")
-        .unwrap_or_else(|_| "https://anyrouter.top/v1".to_string());
+    let base =
+        std::env::var("PROBE_BASE_URL").unwrap_or_else(|_| "https://anyrouter.top/v1".to_string());
     let key = std::env::var("PROBE_API_KEY")
         .or_else(|_| std::env::var("DASHSCOPE_API_KEY"))
         .expect("请设置 PROBE_API_KEY 或 DASHSCOPE_API_KEY 环境变量");
@@ -36,8 +36,14 @@ async fn main() {
     // reqwest 默认会读取系统代理环境变量，这里把它们打印出来便于判断是否走代理。
     let mut saw_proxy = false;
     for k in [
-        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy",
-        "NO_PROXY", "no_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "NO_PROXY",
+        "no_proxy",
     ] {
         if let Ok(v) = std::env::var(k) {
             println!("[env] {k}={v}");
@@ -73,12 +79,7 @@ async fn main() {
 
     for i in 1..=rounds {
         let started = Instant::now();
-        let resp = client
-            .post(&url)
-            .bearer_auth(&key)
-            .json(&body)
-            .send()
-            .await;
+        let resp = client.post(&url).bearer_auth(&key).json(&body).send().await;
         let ms = started.elapsed().as_millis();
 
         match resp {

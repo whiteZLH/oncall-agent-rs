@@ -424,6 +424,14 @@ pub struct EvidenceCollector {
 }
 
 impl EvidenceCollector {
+    pub fn incident_id(&self) -> &str {
+        &self.incident_id
+    }
+
+    pub fn run_id(&self) -> &str {
+        &self.run_id
+    }
+
     /// 工具调用前：标记 run 进入等待工具状态（对齐 `markRunWaitingTool`）。
     pub fn mark_waiting(&self, tool_name: &str, query_params: &str) {
         mutate_run(&self.incidents, &self.incident_id, &self.run_id, |run| {
